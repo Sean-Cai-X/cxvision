@@ -3760,7 +3760,7 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   } else if (!scriptSupportsNormalTrace) {
     ImGui::TextColored(
         ImVec4(1.0f, 0.43f, 0.35f, 1.0f),
-        "SCRIPT_BINDING_STALE: this saved script uses an older Normal-Trace parameter order.");
+        "SCRIPT_BINDING_STALE: this saved script uses an older Normal-Trace binding.");
     ImGui::TextWrapped(
         "This is a CxScript compatibility block, not a FastMatch parameter. "
         "Learn and Learn + Match automatically create a compatible candidate "
@@ -3769,23 +3769,23 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
         "remain unchanged.");
   } else {
     ImGui::TextColored(ImVec4(0.30f, 0.82f, 0.58f, 1.0f),
-                       "READY: Learn will run FindLine anchors -> local slope/normal "
-                       "prefilter -> ANN -> Dijkstra -> normal pairs.");
+                       "READY: Learn will run selected FindLine conclusions -> "
+                       "value-preserving XY compression -> Dijkstra -> derived "
+                       "polyline -> domain-polarity normal pairs.");
     ImGui::TextDisabled(
-        "The Sobel domain is deterministic image evidence; no random point "
-        "cloud is generated. ANN and Dijkstra cannot see rejected points.");
+        "Normal-Trace performs no image edge extraction. Dijkstra selects "
+        "original conclusion references and generates zero new conclusions.");
   }
-  edited |= DrawRuntimeIntRow(context, "domain overlap radius px",
+  edited |= DrawRuntimeIntRow(context, "conclusion de-duplication radius px",
       "global_fastmatch_normaltrace_overlap_radius_px", 3, 0, 64, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "minimum gradient",
-      "global_fastmatch_normaltrace_min_gradient", 20, 1, 255, 250.0f);
   edited |= DrawRuntimeIntRow(context, "Dijkstra maximum nodes",
       "global_fastmatch_normaltrace_max_nodes", 4096, 32, 200000, 250.0f);
   edited |= DrawRuntimeIntRow(context, "normal pair offset px",
       "global_fastmatch_normaltrace_pair_offset_px", 6, 1, 128, 250.0f);
+  ImGui::TextDisabled(
+      "Legacy minimum-gradient and gradient-cost values remain script-compatible "
+      "but are ignored by the conclusion graph.");
   ImGui::SeparatorText("Dijkstra Path Costs");
-  edited |= DrawRuntimeIntRow(context, "gradient cost weight permille",
-      "global_fastmatch_normaltrace_gradient_weight_permille", 700, 0, 10000, 250.0f);
   edited |= DrawRuntimeIntRow(context, "turn cost weight permille",
       "global_fastmatch_normaltrace_turn_weight_permille", 200, 0, 10000, 250.0f);
   edited |= DrawRuntimeIntRow(context, "gap cost weight permille",
@@ -3794,65 +3794,68 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_max_trace_gap_px", 3, 1, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "ANN nearest candidates",
       "global_fastmatch_normaltrace_knn_neighbors", 6, 1, 32, 250.0f);
-  ImGui::SeparatorText("Anchor Geometry Prefilter + ANN Connectivity");
+  ImGui::SeparatorText("Conclusion Track Connectivity");
   edited |= DrawRuntimeIntRow(context, "ANN base radius px (adaptive up to 2x)",
       "global_fastmatch_normaltrace_ann_radius_px", 32, 6, 256, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "anchor/ANN slope tolerance deg",
+  edited |= DrawRuntimeIntRow(context, "path slope tolerance deg",
       "global_fastmatch_normaltrace_ann_tangent_deviation_deg", 35, 1, 89, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "anchor/ANN scan-normal tolerance deg",
+  edited |= DrawRuntimeIntRow(context, "domain-normal continuity tolerance deg",
       "global_fastmatch_normaltrace_ann_normal_deviation_deg", 35, 1, 89, 250.0f);
   ImGui::TextDisabled(
-      "Before ANN: nearest FindLine conclusion -> adjacent-point slope -> "
-      "Gauge scan normal. Candidates failing either angle are rejected.");
+      "Edges connect only original conclusions with compatible path slope and "
+      "the same signed FindLine domain-normal track.");
   edited |= DrawRuntimeIntRow(context, "minimum component points",
       "global_fastmatch_normaltrace_ann_min_component_points", 4, 2, 256, 250.0f);
   edited |= DrawRuntimeIntRow(context, "minimum component coverage %",
       "global_fastmatch_normaltrace_ann_min_component_coverage_percent", 55, 1, 100, 250.0f);
-  ImGui::SeparatorText("Anchor Neighbourhood and XY Compression");
-  edited |= DrawRuntimeIntRow(context, "anchor neighbourhood radius px",
+  ImGui::SeparatorText("Selected Conclusion XY Compression");
+  edited |= DrawRuntimeIntRow(context, "track endpoint support radius px",
       "global_fastmatch_normaltrace_anchor_radius_px", 24, 4, 256, 250.0f);
   edited |= DrawRuntimeIntRow(context, "local XY compression bin px",
       "global_fastmatch_normaltrace_xy_compression_bin_px", 4, 1, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "minimum keypoints per direction",
       "global_fastmatch_normaltrace_min_keypoints_per_domain", 4, 2, 256, 250.0f);
-  {
-    const int effectiveBand = std::max(
-        2, std::min(RuntimeIntOr(context,
-                                 "global_fastmatch_normaltrace_anchor_radius_px", 24),
-                    std::max(RuntimeIntOr(
-                                 context,
-                                 "global_fastmatch_normaltrace_pair_offset_px", 6),
-                             RuntimeIntOr(
-                                 context,
-                                 "global_fastmatch_normaltrace_xy_compression_bin_px", 4) *
-                                 2)));
-    ImGui::TextDisabled(
-        "Effective pre-Dijkstra normal band: %d px "
-        "(max(pair offset, 2 x XY bin), capped by anchor radius)",
-        effectiveBand);
-  }
+  ImGui::TextDisabled(
+      "Each de-duplication/XY bucket keeps one medoid that is an existing "
+      "FindLine conclusion; no averaged coordinate is created.");
+  ImGui::SeparatorText("Derived Junction Reconstruction");
+  edited |= DrawRuntimeIntRow(context, "endpoint spike ratio % of median gap",
+      "global_fastmatch_normaltrace_endpoint_spike_ratio_percent", 250, 110, 1000, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "junction tangent source points",
+      "global_fastmatch_normaltrace_junction_tangent_window_points", 6, 2, 32, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "junction minimum cross angle deg",
+      "global_fastmatch_normaltrace_junction_min_cross_angle_deg", 12, 1, 89, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "junction maximum extrapolation %",
+      "global_fastmatch_normaltrace_junction_max_extrapolation_percent", 150, 25, 500, 250.0f);
+  edited |= DrawRuntimeIntRow(context, "junction join spacing multiplier %",
+      "global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent", 800, 100, 2000, 250.0f);
+  ImGui::TextDisabled(
+      "Adjacent direction endpoints are not joined by a diagonal chord. A "
+      "bounded operator-selected source-point tangent window reconstructs a sharp "
+      "junction; near-parallel or excessive extrapolation uses a tangent blend.");
+  ImGui::TextDisabled(
+      "Junction reach follows track endpoint support radius and observed source "
+      "spacing. Path slope tolerance controls neighbourhood direction stability. "
+      "Orange junctions are derived geometry, never conclusion points.");
   ImGui::SeparatorText("Normal Pair Geometry");
   edited |= DrawRuntimeIntRow(context, "normal angle tolerance deg",
       "global_fastmatch_normaltrace_angle_tolerance_deg", 20, 1, 90, 250.0f);
   edited |= DrawRuntimeIntRow(context, "closed trace minimum length px",
       "global_fastmatch_normaltrace_min_length_px", 20, 2, 10000, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "normal polarity (-1/0/1)",
-      "global_fastmatch_normaltrace_polarity", 0, -1, 1, 250.0f);
   ImGui::TextDisabled(
-      "Polarity: 0 inherits each direction's FindLine Detection Edge and "
-      "selected conclusion point; +1 follows Gauge Line direction; -1 uses "
-      "the opposite direction.");
+      "Polarity source: inherited from each directional FindLine Detection "
+      "Edge. The legacy Normal-Trace polarity value is ignored.");
   edited |= DrawRuntimeIntRow(context, "corner rejection radius px",
       "global_fastmatch_normaltrace_corner_rejection_px", 4, 0, 64, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "tangent sample step px",
+  edited |= DrawRuntimeIntRow(context, "normal pair source-point stride",
       "global_fastmatch_normaltrace_tangent_step_px", 2, 1, 64, 250.0f);
   ImGui::SeparatorText("Trace Evidence Overlay (render-only)");
-  ImGui::Checkbox("Show de-duplicated domain",
+  ImGui::Checkbox("Show selected/de-duplicated conclusions",
                   &context.show_fastmatch_normal_trace_domain);
   ImGui::SameLine();
-  ImGui::Checkbox("Show ANN selected component",
+  ImGui::Checkbox("Show selected conclusion track",
                   &context.show_fastmatch_normal_trace_ann_component);
-  ImGui::Checkbox("Show Dijkstra trace",
+  ImGui::Checkbox("Show Dijkstra sources + derived polyline",
                   &context.show_fastmatch_normal_trace_path);
   ImGui::SameLine();
   ImGui::Checkbox("Show normal A/B pairs",
@@ -3989,11 +3992,12 @@ static void RequestFastMatchRunAction(ManualTestContext &context,
 }
 
 static bool FastMatchScriptSupportsNormalTrace(const ManualTestContext &context) {
-  return context.editor_text.find("fastmatch_normal_trace_binding_version: 2") !=
+  return context.editor_text.find("fastmatch_normal_trace_binding_version: 3") !=
              std::string::npos &&
          context.editor_text.find("setnormaltraceenabled") != std::string::npos &&
          context.editor_text.find("setnormaltraceparams") != std::string::npos &&
          context.editor_text.find("setnormaltracedomain") != std::string::npos &&
+         context.editor_text.find("setnormaltracejunction") != std::string::npos &&
          context.editor_text.find("setnormaltraceknn") != std::string::npos &&
          context.editor_text.find("setnormaltraceann") != std::string::npos;
 }
@@ -4219,17 +4223,30 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
       object->fastmatch_normal_trace_path_count > 0 ||
       !object->fastmatch_normal_trace_reason.empty()) {
     ImGui::TextUnformatted("Normal-Trace Evidence");
-    ImGui::Text("domain raw=%d | retained=%d | Dijkstra path=%d | normal pairs=%d",
+    ImGui::Text("FindLine conclusions=%d | retained=%d | derived trace=%d | normal pairs=%d",
                 object->fastmatch_normal_trace_domain_count,
                 object->fastmatch_normal_trace_deduplicated_count,
                 object->fastmatch_normal_trace_path_count,
                 object->fastmatch_normal_trace_pair_count);
-    ImGui::Text("directional sides=%d/4 | trace segments=%d/4 | closure=%.2f px | max step=%.2f px | gradient coverage=%.1f%%",
+    ImGui::Text("directional sides=%d/4 | trace segments=%d/4 | closure=%.2f px | max step=%.2f px | selected-anchor coverage=%.1f%%",
                 object->fastmatch_normal_trace_side_count,
                 object->fastmatch_normal_trace_segment_count,
                 object->fastmatch_normal_trace_closure_error_px,
                 object->fastmatch_normal_trace_max_consecutive_gap_px,
-                object->fastmatch_normal_trace_gradient_coverage * 100.0);
+                object->fastmatch_normal_trace_selected_anchor_coverage * 100.0);
+    ImGui::Text(
+        "Dijkstra source conclusions=%d | derived polyline points=%d | generated conclusions=%d",
+        object->fastmatch_normal_trace_dijkstra_source_count,
+        object->fastmatch_normal_trace_derived_count,
+        object->fastmatch_normal_trace_generated_conclusion_count);
+    ImGui::Text("derived junctions: tangent intersection=%d | tangent blend=%d",
+                object->fastmatch_normal_trace_junction_intersection_count,
+                object->fastmatch_normal_trace_junction_blend_count);
+    ImGui::Text("endpoint spikes pruned Top/Bottom/Left/Right=%d/%d/%d/%d",
+                object->fastmatch_normal_trace_endpoint_spike_pruned_counts[0],
+                object->fastmatch_normal_trace_endpoint_spike_pruned_counts[1],
+                object->fastmatch_normal_trace_endpoint_spike_pruned_counts[2],
+                object->fastmatch_normal_trace_endpoint_spike_pruned_counts[3]);
     ImGui::Text(
         "FindLine-bound pairs=%d | binding misses=%d | corner rejected=%d | loop erased=%d",
         object->fastmatch_normal_trace_findline_bound_pairs,
@@ -4241,17 +4258,14 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
                 object->fastmatch_normal_trace_pair_direction_counts[1],
                 object->fastmatch_normal_trace_pair_direction_counts[2],
                  object->fastmatch_normal_trace_pair_direction_counts[3]);
-    ImGui::Text("anchor prefilter normal band=%.1f px",
-                object->fastmatch_normal_trace_anchor_normal_band_px);
     static const char *prefilterDirectionNames[4] = {
         "Top", "Bottom", "Left", "Right"};
     for (int direction = 0; direction < 4; ++direction) {
       ImGui::Text(
-          "%s anchor near/accepted=%d/%d | rejected band/slope/normal=%d/%d/%d",
+          "%s selected/valid=%d/%d | rejected invalid slope/normal=%d/%d",
           prefilterDirectionNames[direction],
           object->fastmatch_normal_trace_anchor_near_counts[direction],
           object->fastmatch_normal_trace_anchor_accepted_counts[direction],
-          object->fastmatch_normal_trace_anchor_band_rejected_counts[direction],
           object->fastmatch_normal_trace_anchor_slope_rejected_counts[direction],
           object->fastmatch_normal_trace_anchor_normal_rejected_counts[direction]);
     }

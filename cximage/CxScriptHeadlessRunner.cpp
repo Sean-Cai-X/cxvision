@@ -1759,6 +1759,23 @@ CxScriptResultPackage BuildCxScriptResultPackage(
         capture.fastmatch_normal_trace.max_consecutive_gap_px;
     pkg.metrics["fastmatch_normal_trace_gradient_coverage"] =
         capture.fastmatch_normal_trace.gradient_coverage;
+    pkg.metrics["fastmatch_normal_trace_selected_anchor_coverage"] =
+        capture.fastmatch_normal_trace.selected_anchor_coverage;
+    pkg.metrics["fastmatch_normal_trace_generated_conclusion_count"] =
+        capture.fastmatch_normal_trace.generated_conclusion_count;
+    pkg.metrics["fastmatch_normal_trace_dijkstra_source_count"] =
+        static_cast<double>(
+            capture.fastmatch_normal_trace.dijkstra_trace_points.size());
+    pkg.metrics["fastmatch_normal_trace_derived_trace_point_count"] =
+        static_cast<double>(
+            capture.fastmatch_normal_trace.derived_trace_points.size());
+    pkg.metrics["fastmatch_normal_trace_derived_junction_count"] =
+        static_cast<double>(
+            capture.fastmatch_normal_trace.derived_junction_points.size());
+    pkg.metrics["fastmatch_normal_trace_tangent_intersection_junction_count"] =
+        static_cast<double>(std::count(
+            capture.fastmatch_normal_trace.derived_junction_modes.begin(),
+            capture.fastmatch_normal_trace.derived_junction_modes.end(), 1));
     pkg.metrics["fastmatch_normal_trace_findline_bound_pairs"] =
         capture.fastmatch_normal_trace.normal_pair_findline_bound_count;
     pkg.metrics["fastmatch_normal_trace_binding_misses"] =
@@ -1773,6 +1790,11 @@ CxScriptResultPackage BuildCxScriptResultPackage(
         capture.fastmatch_normal_trace.succeeded ? "true" : "false";
     pkg.facts["fastmatch_normal_trace_reason"] =
         capture.fastmatch_normal_trace.reason;
+    pkg.facts["fastmatch_normal_trace_point_source"] =
+        "directional_findline_selected_conclusions";
+    pkg.facts["fastmatch_normal_trace_polarity_source"] =
+        "directional_findline_domain";
+    pkg.facts["fastmatch_normal_trace_image_reprocessing"] = "false";
     pkg.metrics["candidate_count"] = capture.candidate_count;
     pkg.metrics["best_score"] = capture.best_score;
     pkg.metrics["rendered_measure_points_count"] = capture.rendered_measure_points_count;
@@ -3084,6 +3106,52 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     CxOverlayRenderResult render_result;
 
+    const auto render_normal_trace_evidence = [&capture](cv::Mat& canvas)
+    {
+        if (canvas.empty() || !capture.fastmatch_normal_trace.executed)
+            return;
+        const auto to_point = [](const CxFastMatchNormalTracePointEvidence& point)
+        {
+            return cv::Point(static_cast<int>(std::lround(point.x)),
+                             static_cast<int>(std::lround(point.y)));
+        };
+        std::vector<cv::Point> derived;
+        derived.reserve(capture.fastmatch_normal_trace.derived_trace_points.size());
+        for (const auto& point : capture.fastmatch_normal_trace.derived_trace_points)
+            derived.push_back(to_point(point));
+        if (derived.size() >= 2)
+            cv::polylines(canvas, derived, false, cv::Scalar(255, 255, 0), 1,
+                          cv::LINE_AA);
+        for (const auto& point : capture.fastmatch_normal_trace.dijkstra_trace_points)
+            cv::circle(canvas, to_point(point), 2, cv::Scalar(0, 255, 255), -1,
+                       cv::LINE_AA);
+        for (const auto& point : capture.fastmatch_normal_trace.derived_junction_points)
+            cv::circle(canvas, to_point(point), 5, cv::Scalar(0, 165, 255), 2,
+                       cv::LINE_AA);
+        const std::size_t pair_count = std::min(
+            capture.fastmatch_normal_trace.normal_pair_source_points.size(),
+            std::min(capture.fastmatch_normal_trace.normal_pair_a.size(),
+                     capture.fastmatch_normal_trace.normal_pair_b.size()));
+        for (std::size_t index = 0; index < pair_count; ++index)
+        {
+            const cv::Point source = to_point(
+                capture.fastmatch_normal_trace.normal_pair_source_points[index]);
+            const cv::Point a =
+                to_point(capture.fastmatch_normal_trace.normal_pair_a[index]);
+            const cv::Point b =
+                to_point(capture.fastmatch_normal_trace.normal_pair_b[index]);
+            cv::line(canvas, b, a, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+            cv::circle(canvas, source, 2, cv::Scalar(0, 255, 255), -1,
+                       cv::LINE_AA);
+            cv::circle(canvas, a, 3, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
+            cv::circle(canvas, b, 3, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+        }
+        cv::putText(canvas,
+                    "source=yellow derived=cyan junction=orange A=red B=green",
+                    cv::Point(8, 18), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                    cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+    };
+
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::RESULT, result_overlay, render_result))
     {
         std::filesystem::create_directories(result_overlay_path.parent_path());
@@ -3096,6 +3164,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::EVIDENCE, evidence_overlay, render_result))
     {
+        render_normal_trace_evidence(evidence_overlay);
         std::filesystem::create_directories(evidence_overlay_path.parent_path());
         if (cv::imwrite(evidence_overlay_path.string(), evidence_overlay))
             result.evidence_overlay_path = evidence_overlay_path.string();
@@ -3103,6 +3172,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
 
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::TOOL_DISPLAY, tool_display, render_result))
     {
+        render_normal_trace_evidence(tool_display);
         std::filesystem::create_directories(tool_display_path.parent_path());
         if (cv::imwrite(tool_display_path.string(), tool_display))
             result.tool_display_path = tool_display_path.string();
@@ -3174,6 +3244,17 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                 << values[0] << "," << values[1] << ","
                 << values[2] << "," << values[3] << "],\n";
         };
+        const auto write_int_array = [&line_trace_file](
+            const char* name, const std::vector<int>& values) {
+            line_trace_file << "  \"" << name << "\": [";
+            for (std::size_t i = 0; i < values.size(); ++i)
+            {
+                if (i != 0)
+                    line_trace_file << ",";
+                line_trace_file << values[i];
+            }
+            line_trace_file << "],\n";
+        };
         line_trace_file << "{\n";
         line_trace_file << "  \"scan_line_count\": " << capture.scan_line_count << ",\n";
         line_trace_file << "  \"sample_count\": " << capture.sample_count << ",\n";
@@ -3201,6 +3282,10 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << capture.fastmatch_normal_trace.max_consecutive_gap_px << ",\n";
         line_trace_file << "  \"gradient_coverage\": "
             << capture.fastmatch_normal_trace.gradient_coverage << ",\n";
+        line_trace_file << "  \"selected_anchor_coverage\": "
+            << capture.fastmatch_normal_trace.selected_anchor_coverage << ",\n";
+        line_trace_file << "  \"generated_conclusion_count\": "
+            << capture.fastmatch_normal_trace.generated_conclusion_count << ",\n";
         line_trace_file << "  \"normal_pair_findline_bound_count\": "
             << capture.fastmatch_normal_trace.normal_pair_findline_bound_count
             << ",\n";
@@ -3239,12 +3324,53 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             capture.fastmatch_normal_trace.ann_selected_point_counts);
         write_double4("ann_selected_coverage",
             capture.fastmatch_normal_trace.ann_selected_coverage);
+        write_double4("domain_join_allowed_gap_px",
+            capture.fastmatch_normal_trace.domain_join_allowed_gap_px);
+        write_double4("domain_join_selected_gap_px",
+            capture.fastmatch_normal_trace.domain_join_selected_gap_px);
+        write_int4("endpoint_spike_pruned_counts",
+            capture.fastmatch_normal_trace.endpoint_spike_pruned_counts);
+        line_trace_file << "  \"endpoint_spike_ratio_percent\": "
+            << capture.fastmatch_normal_trace.endpoint_spike_ratio_percent << ",\n";
+        line_trace_file << "  \"junction_tangent_window_points\": "
+            << capture.fastmatch_normal_trace.junction_tangent_window_points << ",\n";
+        line_trace_file << "  \"junction_min_cross_angle_deg\": "
+            << capture.fastmatch_normal_trace.junction_min_cross_angle_deg << ",\n";
+        line_trace_file << "  \"junction_max_extrapolation_percent\": "
+            << capture.fastmatch_normal_trace.junction_max_extrapolation_percent << ",\n";
+        line_trace_file << "  \"junction_join_spacing_multiplier_percent\": "
+            << capture.fastmatch_normal_trace.junction_join_spacing_multiplier_percent
+            << ",\n";
+        write_int4("derived_junction_modes",
+            capture.fastmatch_normal_trace.derived_junction_modes);
+        write_double4("derived_junction_cross_angle_deg",
+            capture.fastmatch_normal_trace.derived_junction_cross_angle_deg);
+        write_double4("derived_junction_current_extrapolation_px",
+            capture.fastmatch_normal_trace.derived_junction_current_extrapolation_px);
+        write_double4("derived_junction_next_extrapolation_px",
+            capture.fastmatch_normal_trace.derived_junction_next_extrapolation_px);
+        write_point_array("derived_junction_points",
+            capture.fastmatch_normal_trace.derived_junction_points, true);
         write_point_array("dijkstra_trace_points",
             capture.fastmatch_normal_trace.dijkstra_trace_points, true);
+        write_int_array("dijkstra_source_directions",
+            capture.fastmatch_normal_trace.dijkstra_source_directions);
+        write_int_array("dijkstra_source_scans",
+            capture.fastmatch_normal_trace.dijkstra_source_scans);
+        write_point_array("derived_trace_points",
+            capture.fastmatch_normal_trace.derived_trace_points, true);
         write_point_array("normal_pair_a",
             capture.fastmatch_normal_trace.normal_pair_a, true);
         write_point_array("normal_pair_b",
-            capture.fastmatch_normal_trace.normal_pair_b, false);
+            capture.fastmatch_normal_trace.normal_pair_b, true);
+        write_point_array("normal_pair_source_points",
+            capture.fastmatch_normal_trace.normal_pair_source_points, true);
+        write_int_array("normal_pair_source_directions",
+            capture.fastmatch_normal_trace.normal_pair_source_directions);
+        write_int_array("normal_pair_source_scans",
+            capture.fastmatch_normal_trace.normal_pair_source_scans);
+        line_trace_file << "  \"polarity_source\": "
+            << "\"directional_findline_domain\"\n";
         line_trace_file << "}\n";
         line_trace_file.close();
     }
@@ -3373,6 +3499,10 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << ",\"closure_error_px\":" << capture.fastmatch_normal_trace.closure_error_px
             << ",\"max_consecutive_gap_px\":" << capture.fastmatch_normal_trace.max_consecutive_gap_px
             << ",\"gradient_coverage\":" << capture.fastmatch_normal_trace.gradient_coverage
+            << ",\"selected_anchor_coverage\":"
+            << capture.fastmatch_normal_trace.selected_anchor_coverage
+            << ",\"generated_conclusion_count\":"
+            << capture.fastmatch_normal_trace.generated_conclusion_count
             << ",\"normal_pair_findline_bound_count\":"
             << capture.fastmatch_normal_trace.normal_pair_findline_bound_count
             << ",\"normal_pair_binding_miss_count\":"

@@ -1071,6 +1071,10 @@ bool CaptureFastMatchResult(
     normal_trace_capture.max_consecutive_gap_px =
         normal_trace.max_consecutive_gap_px;
     normal_trace_capture.gradient_coverage = normal_trace.gradient_coverage;
+    normal_trace_capture.selected_anchor_coverage =
+        normal_trace.selected_anchor_coverage;
+    normal_trace_capture.generated_conclusion_count =
+        normal_trace.generated_conclusion_count;
     normal_trace_capture.normal_pair_findline_bound_count =
         normal_trace.normal_pair_findline_bound_count;
     normal_trace_capture.normal_pair_binding_miss_count =
@@ -1103,6 +1107,30 @@ bool CaptureFastMatchResult(
         normal_trace.ann_selected_point_counts;
     normal_trace_capture.ann_selected_coverage =
         normal_trace.ann_selected_coverage;
+    normal_trace_capture.domain_join_allowed_gap_px =
+        normal_trace.domain_join_allowed_gap_px;
+    normal_trace_capture.domain_join_selected_gap_px =
+        normal_trace.domain_join_selected_gap_px;
+    normal_trace_capture.endpoint_spike_pruned_counts =
+        normal_trace.endpoint_spike_pruned_counts;
+    normal_trace_capture.endpoint_spike_ratio_percent =
+        normal_trace.endpoint_spike_ratio_percent;
+    normal_trace_capture.junction_tangent_window_points =
+        normal_trace.junction_tangent_window_points;
+    normal_trace_capture.junction_min_cross_angle_deg =
+        normal_trace.junction_min_cross_angle_deg;
+    normal_trace_capture.junction_max_extrapolation_percent =
+        normal_trace.junction_max_extrapolation_percent;
+    normal_trace_capture.junction_join_spacing_multiplier_percent =
+        normal_trace.junction_join_spacing_multiplier_percent;
+    normal_trace_capture.derived_junction_modes =
+        normal_trace.derived_junction_modes;
+    normal_trace_capture.derived_junction_cross_angle_deg =
+        normal_trace.derived_junction_cross_angle_deg;
+    normal_trace_capture.derived_junction_current_extrapolation_px =
+        normal_trace.derived_junction_current_extrapolation_px;
+    normal_trace_capture.derived_junction_next_extrapolation_px =
+        normal_trace.derived_junction_next_extrapolation_px;
     const auto copy_normal_trace_points = [](const auto& source, auto& target) {
         target.clear();
         target.reserve(source.size());
@@ -1113,11 +1141,28 @@ bool CaptureFastMatchResult(
         normal_trace.dijkstra_trace_points,
         normal_trace_capture.dijkstra_trace_points);
     copy_normal_trace_points(
+        normal_trace.derived_junction_points,
+        normal_trace_capture.derived_junction_points);
+    normal_trace_capture.dijkstra_source_directions =
+        normal_trace.dijkstra_source_directions;
+    normal_trace_capture.dijkstra_source_scans =
+        normal_trace.dijkstra_source_scans;
+    copy_normal_trace_points(
+        normal_trace.derived_trace_points,
+        normal_trace_capture.derived_trace_points);
+    copy_normal_trace_points(
         normal_trace.normal_pair_a,
         normal_trace_capture.normal_pair_a);
     copy_normal_trace_points(
         normal_trace.normal_pair_b,
         normal_trace_capture.normal_pair_b);
+    copy_normal_trace_points(
+        normal_trace.normal_pair_source_points,
+        normal_trace_capture.normal_pair_source_points);
+    normal_trace_capture.normal_pair_source_directions =
+        normal_trace.normal_pair_source_directions;
+    normal_trace_capture.normal_pair_source_scans =
+        normal_trace.normal_pair_source_scans;
     if (normal_trace.executed)
         output.algorithm_executed = true;
 

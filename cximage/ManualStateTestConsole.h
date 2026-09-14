@@ -511,6 +511,13 @@ struct RuntimeObjectView {
   double fastmatch_normal_trace_closure_error_px = -1.0;
   double fastmatch_normal_trace_max_consecutive_gap_px = -1.0;
   double fastmatch_normal_trace_gradient_coverage = 0.0;
+  double fastmatch_normal_trace_selected_anchor_coverage = 0.0;
+  int fastmatch_normal_trace_dijkstra_source_count = 0;
+  int fastmatch_normal_trace_derived_count = 0;
+  int fastmatch_normal_trace_junction_intersection_count = 0;
+  int fastmatch_normal_trace_junction_blend_count = 0;
+  std::array<int, 4> fastmatch_normal_trace_endpoint_spike_pruned_counts{};
+  int fastmatch_normal_trace_generated_conclusion_count = 0;
   int fastmatch_normal_trace_findline_bound_pairs = 0;
   int fastmatch_normal_trace_binding_misses = 0;
   int fastmatch_normal_trace_corner_rejected = 0;

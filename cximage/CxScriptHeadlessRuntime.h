@@ -153,6 +153,8 @@ struct CxFastMatchNormalTraceEvidence
     double closure_error_px = -1.0;
     double max_consecutive_gap_px = -1.0;
     double gradient_coverage = 0.0;
+    double selected_anchor_coverage = 0.0;
+    int generated_conclusion_count = 0;
     int normal_pair_findline_bound_count = 0;
     int normal_pair_binding_miss_count = 0;
     int normal_pair_corner_rejected_count = 0;
@@ -170,9 +172,28 @@ struct CxFastMatchNormalTraceEvidence
     std::array<int, 4> ann_component_counts{};
     std::array<int, 4> ann_selected_point_counts{};
     std::array<double, 4> ann_selected_coverage{};
+    std::array<double, 4> domain_join_allowed_gap_px{};
+    std::array<double, 4> domain_join_selected_gap_px{};
+    std::array<int, 4> endpoint_spike_pruned_counts{};
+    int endpoint_spike_ratio_percent = 0;
+    int junction_tangent_window_points = 0;
+    int junction_min_cross_angle_deg = 0;
+    int junction_max_extrapolation_percent = 0;
+    int junction_join_spacing_multiplier_percent = 0;
+    std::array<int, 4> derived_junction_modes{};
+    std::array<double, 4> derived_junction_cross_angle_deg{};
+    std::array<double, 4> derived_junction_current_extrapolation_px{};
+    std::array<double, 4> derived_junction_next_extrapolation_px{};
+    std::vector<CxFastMatchNormalTracePointEvidence> derived_junction_points;
     std::vector<CxFastMatchNormalTracePointEvidence> dijkstra_trace_points;
+    std::vector<int> dijkstra_source_directions;
+    std::vector<int> dijkstra_source_scans;
+    std::vector<CxFastMatchNormalTracePointEvidence> derived_trace_points;
     std::vector<CxFastMatchNormalTracePointEvidence> normal_pair_a;
     std::vector<CxFastMatchNormalTracePointEvidence> normal_pair_b;
+    std::vector<CxFastMatchNormalTracePointEvidence> normal_pair_source_points;
+    std::vector<int> normal_pair_source_directions;
+    std::vector<int> normal_pair_source_scans;
 };
 
 struct CxOcrGlyphCandidateEvidence

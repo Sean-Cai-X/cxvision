@@ -26,7 +26,8 @@ namespace {
 struct NormalTraceCandidate {
   cv::Point point;
   cv::Point2f normal;
-  float gradient = 0.0f;
+  int source_scan_index = -1;
+  int domain_polarity = 0;
 };
 
 std::string NormalTraceAnnEvidenceSummary(
@@ -51,48 +52,18 @@ std::string NormalTraceAnnEvidenceSummary(
 std::string NormalTraceAnchorPrefilterSummary(
     const FastMatch::NormalTraceEvidence &evidence) {
   static const char *names[4] = {"top", "bottom", "left", "right"};
-  std::string summary = "band_px=" +
-      std::to_string(evidence.anchor_normal_band_px);
+  std::string summary = "source=findline_selected_conclusions generated=0";
   for (int direction = 0; direction < 4; ++direction) {
-    summary += " " + std::string(names[direction]) + "={near=" +
+    summary += " " + std::string(names[direction]) + "={selected=" +
         std::to_string(evidence.anchor_near_candidate_counts[direction]) +
-        ",accepted=" +
+        ",valid=" +
         std::to_string(evidence.anchor_prefilter_accepted_counts[direction]) +
-        ",reject_band=" +
-        std::to_string(evidence.anchor_band_rejected_counts[direction]) +
-        ",reject_slope=" +
+        ",invalid_slope=" +
         std::to_string(evidence.anchor_slope_rejected_counts[direction]) +
-        ",reject_normal=" +
+        ",invalid_domain_normal=" +
         std::to_string(evidence.anchor_normal_rejected_counts[direction]) + "}";
   }
   return summary;
-}
-
-std::vector<NormalTraceCandidate> BuildNormalTraceDomain(
-    const cv::Mat& gray, const cv::Rect& roi, int minGradient,
-    int overlapRadius, int& rawCount) {
-  rawCount = 0;
-  cv::Mat gx, gy;
-  cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
-  cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
-  std::vector<NormalTraceCandidate> candidates;
-  const cv::Rect bounded = roi & cv::Rect(0, 0, gray.cols, gray.rows);
-  for (int y = bounded.y + 1; y < bounded.br().y - 1; ++y) {
-    for (int x = bounded.x + 1; x < bounded.br().x - 1; ++x) {
-      const float dx = gx.at<float>(y, x);
-      const float dy = gy.at<float>(y, x);
-      const float magnitude = std::hypot(dx, dy);
-      if (magnitude < static_cast<float>(minGradient))
-        continue;
-      ++rawCount;
-      const float inv = 1.0f / std::max(1e-6f, magnitude);
-      candidates.push_back({cv::Point(x, y), cv::Point2f(dx * inv, dy * inv), magnitude});
-    }
-  }
-  // Classification and de-duplication are intentionally deferred to the
-  // directional anchor neighbourhoods. Global strongest-first NMS would let
-  // one physical edge suppress the other three before their topology is known.
-  return candidates;
 }
 
 struct NormalTraceKeyPoint {
@@ -107,10 +78,20 @@ struct NormalTraceKeyPoint {
   float anchor_normal_alignment = 0.0f;
 };
 
+struct NormalTraceSourceConclusion {
+  cv::Point point;
+  cv::Point2f domain_normal;
+  int direction = -1;
+  int scan_index = -1;
+};
+
 struct NormalTraceAnchorFrame {
   cv::Point2f point;
   cv::Point2f tangent;
   cv::Point2f scan_normal;
+  int direction = -1;
+  int scan_index = -1;
+  int domain_polarity = 0;
   bool tangent_valid = false;
   bool scan_normal_valid = false;
 };
@@ -153,6 +134,9 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
       NormalTraceAnchorFrame frame;
       frame.point = cv::Point2f(static_cast<float>(point.x),
                                 static_cast<float>(point.y));
+      frame.direction = direction;
+      frame.scan_index = static_cast<int>(i);
+      frame.domain_polarity = side.params.method == 0 ? 1 : -1;
       if (i < side.scan_lines.size()) {
         const FastMatch::DirectionalProbeScanLine &line = side.scan_lines[i];
         frame.scan_normal = cv::Point2f(
@@ -166,17 +150,8 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
       }
       anchors[direction].push_back(frame);
     }
-    if (anchors[direction].empty()) {
-      for (const CxShapePoint &point : side.accepted_points) {
-        NormalTraceAnchorFrame frame;
-        frame.point = cv::Point2f(static_cast<float>(point.x),
-                                  static_cast<float>(point.y));
-        anchors[direction].push_back(frame);
-      }
-    }
-
-    // The local boundary slope is estimated from adjacent selected FindLine
-    // conclusions, never from the unclassified Sobel cloud. Endpoints use a
+    // The local boundary slope is estimated exclusively from adjacent selected
+    // FindLine conclusions. Endpoints use a
     // one-sided estimate; interior anchors use the wider previous-to-next
     // chord, which is less sensitive to one noisy Gauge Line conclusion.
     for (std::size_t i = 0; i < anchors[direction].size(); ++i) {
@@ -204,16 +179,6 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
         anchors[direction][i].tangent = tangent * (1.0f / tangentLength);
         anchors[direction][i].tangent_valid = true;
       }
-      // Fallback anchors do not have a retained Gauge Line. Their normal is
-      // still derived from the local conclusion slope, not from candidate
-      // pixels, so the pre-Dijkstra ordering remains deterministic.
-      if (!anchors[direction][i].scan_normal_valid &&
-          anchors[direction][i].tangent_valid) {
-        const cv::Point2f &localTangent = anchors[direction][i].tangent;
-        anchors[direction][i].scan_normal =
-            cv::Point2f(-localTangent.y, localTangent.x);
-        anchors[direction][i].scan_normal_valid = true;
-      }
     }
     if (!anchors[direction].empty())
       ++availableSides;
@@ -221,175 +186,91 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
   return anchors;
 }
 
-bool ResolveNormalTraceFindLineNormal(
-    const FastMatch &source, const cv::Point &point, int polarityMode,
-    cv::Point2f &normal, int &boundDirection, int &boundScan,
-    double &anchorDistance) {
-  boundDirection = -1;
-  boundScan = -1;
-  anchorDistance = std::numeric_limits<double>::infinity();
-  const FastMatch::DirectionalProbeScanLine *boundLine = nullptr;
-  const FastMatch::DirectionalProbeEvidence *boundEvidence = nullptr;
-  for (int direction = 0; direction < 4; ++direction) {
-    const FastMatch::DirectionalProbeEvidence &side =
-        source.getdirectionalprobeevidence(direction);
-    const std::size_t count = std::min(
-        side.selected_point_by_scan.size(),
-        std::min(side.selected_point_valid_by_scan.size(),
-                 side.scan_lines.size()));
-    for (std::size_t scan = 0; scan < count; ++scan) {
-      if (side.selected_point_valid_by_scan[scan] == 0)
-        continue;
-      const CxShapePoint &anchor = side.selected_point_by_scan[scan];
-      const double dx = static_cast<double>(point.x) - anchor.x;
-      const double dy = static_cast<double>(point.y) - anchor.y;
-      const double distance = std::hypot(dx, dy);
-      if (distance < anchorDistance) {
-        anchorDistance = distance;
-        boundDirection = direction;
-        boundScan = static_cast<int>(scan);
-        boundLine = &side.scan_lines[scan];
-        boundEvidence = &side;
-      }
-    }
-  }
-  if (boundLine == nullptr || boundEvidence == nullptr)
-    return false;
-  cv::Point2f scanNormal(
-      static_cast<float>(boundLine->p1.x - boundLine->p0.x),
-      static_cast<float>(boundLine->p1.y - boundLine->p0.y));
-  const float length = std::sqrt(scanNormal.dot(scanNormal));
-  if (length < 1e-6f)
-    return false;
-  scanNormal *= 1.0f / length;
-
-  // polarityMode=0 inherits the exact FindLine Detection Edge polarity that
-  // produced the selected conclusion point. Explicit +/- modes force the
-  // positive/opposite Gauge Line direction for diagnostic override only.
-  const float polarity = polarityMode == 0
-      ? (boundEvidence->params.method == 0 ? 1.0f : -1.0f)
-      : (polarityMode > 0 ? 1.0f : -1.0f);
-  normal = scanNormal * polarity;
-  return true;
-}
-
 bool BuildCompressedNormalTraceDomains(
-    const std::vector<NormalTraceCandidate> &raw,
     const std::array<std::vector<NormalTraceAnchorFrame>, 4> &anchors,
     double centerX, double centerY, double cosAngle, double sinAngle,
     const FastMatch::NormalTraceLearnConfig &cfg,
     std::array<std::vector<NormalTraceKeyPoint>, 4> &keypoints,
     FastMatch::NormalTraceEvidence &evidence) {
-  std::array<std::vector<NormalTraceKeyPoint>, 4> classified;
-  const float anchorRadius =
-      static_cast<float>(std::max(4, cfg.anchor_neighborhood_radius_px));
-  // The neighbourhood radius controls tangential reach between Gauge Line
-  // conclusions. The much narrower normal band controls which physical edge
-  // is eligible. It is derived from already exposed controls, so old scripts
-  // remain compatible while the effective value stays visible in Evidence.
-  const float anchorNormalBand = std::max(
-      2.0f, std::min(anchorRadius,
-                     static_cast<float>(std::max(
-                         cfg.normal_pair_offset_px,
-                         cfg.xy_compression_bin_px * 2))));
-  evidence.anchor_normal_band_px = anchorNormalBand;
-  const float requiredSlopeAlignment = std::cos(
-      static_cast<float>(std::clamp(cfg.ann_tangent_deviation_deg, 1, 89)) *
-      static_cast<float>(CV_PI / 180.0));
-  const float requiredNormalAlignment = std::cos(
-      static_cast<float>(std::clamp(cfg.ann_normal_deviation_deg, 1, 89)) *
-      static_cast<float>(CV_PI / 180.0));
-  for (const NormalTraceCandidate &candidate : raw) {
-    int selectedDirection = -1;
-    const NormalTraceAnchorFrame *selectedAnchor = nullptr;
-    float bestDistance = std::numeric_limits<float>::infinity();
-    for (int direction = 0; direction < 4; ++direction) {
-      for (const NormalTraceAnchorFrame &anchor : anchors[direction]) {
-        const float distance = cv::norm(cv::Point2f(
-            static_cast<float>(candidate.point.x) - anchor.point.x,
-            static_cast<float>(candidate.point.y) - anchor.point.y));
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          selectedDirection = direction;
-          selectedAnchor = &anchor;
-        }
-      }
-    }
-    if (selectedDirection < 0 || selectedAnchor == nullptr ||
-        bestDistance > anchorRadius)
-      continue;
-
-    ++evidence.anchor_near_candidate_counts[selectedDirection];
-    const cv::Point2f delta(
-        static_cast<float>(candidate.point.x) - selectedAnchor->point.x,
-        static_cast<float>(candidate.point.y) - selectedAnchor->point.y);
-    const float normalDistance = selectedAnchor->scan_normal_valid
-        ? std::abs(delta.dot(selectedAnchor->scan_normal))
-        : bestDistance;
-    const cv::Point2f candidateTangent(-candidate.normal.y,
-                                       candidate.normal.x);
-    const float slopeAlignment = selectedAnchor->tangent_valid
-        ? std::abs(candidateTangent.dot(selectedAnchor->tangent))
-        : 0.0f;
-    const float normalAlignment = selectedAnchor->scan_normal_valid
-        ? std::abs(candidate.normal.dot(selectedAnchor->scan_normal))
-        : 0.0f;
-    const bool bandAccepted = normalDistance <= anchorNormalBand;
-    const bool slopeAccepted = selectedAnchor->tangent_valid &&
-                               slopeAlignment >= requiredSlopeAlignment;
-    const bool normalAccepted = selectedAnchor->scan_normal_valid &&
-                                normalAlignment >= requiredNormalAlignment;
-    if (!bandAccepted)
-      ++evidence.anchor_band_rejected_counts[selectedDirection];
-    if (!slopeAccepted)
-      ++evidence.anchor_slope_rejected_counts[selectedDirection];
-    if (!normalAccepted)
-      ++evidence.anchor_normal_rejected_counts[selectedDirection];
-    if (!bandAccepted || !slopeAccepted || !normalAccepted)
-      continue;
-
-    NormalTraceKeyPoint key;
-    key.candidate = candidate;
-    key.direction = selectedDirection;
-    key.anchor_distance = bestDistance;
-    key.anchor_normal_distance = normalDistance;
-    key.anchor_slope_alignment = slopeAlignment;
-    key.anchor_normal_alignment = normalAlignment;
-    classified[selectedDirection].push_back(key);
-    ++evidence.anchor_prefilter_accepted_counts[selectedDirection];
-  }
-
+  evidence.anchor_normal_band_px = 0.0;
   const int overlapRadius2 =
       std::max(0, cfg.domain_overlap_radius_px * cfg.domain_overlap_radius_px);
   const int binSize = std::max(1, cfg.xy_compression_bin_px);
   for (int direction = 0; direction < 4; ++direction) {
-    std::vector<NormalTraceKeyPoint> &items = classified[direction];
-    std::sort(items.begin(), items.end(),
-              [](const NormalTraceKeyPoint &a, const NormalTraceKeyPoint &b) {
-                if (a.anchor_normal_distance != b.anchor_normal_distance)
-                  return a.anchor_normal_distance < b.anchor_normal_distance;
-                const float aAlignment =
-                    std::min(a.anchor_slope_alignment, a.anchor_normal_alignment);
-                const float bAlignment =
-                    std::min(b.anchor_slope_alignment, b.anchor_normal_alignment);
-                if (aAlignment != bAlignment)
-                  return aAlignment > bAlignment;
-                return a.candidate.gradient > b.candidate.gradient;
-              });
-    std::vector<NormalTraceKeyPoint> retained;
-    for (const NormalTraceKeyPoint &key : items) {
-      bool overlap = false;
-      for (const NormalTraceKeyPoint &kept : retained) {
-        const int dx = key.candidate.point.x - kept.candidate.point.x;
-        const int dy = key.candidate.point.y - kept.candidate.point.y;
-        if (dx * dx + dy * dy <= overlapRadius2) {
-          overlap = true;
+    std::vector<NormalTraceKeyPoint> original;
+    for (const NormalTraceAnchorFrame &anchor : anchors[direction]) {
+      ++evidence.anchor_near_candidate_counts[direction];
+      if (!anchor.tangent_valid) {
+        ++evidence.anchor_slope_rejected_counts[direction];
+        continue;
+      }
+      if (!anchor.scan_normal_valid || anchor.domain_polarity == 0) {
+        ++evidence.anchor_normal_rejected_counts[direction];
+        continue;
+      }
+      NormalTraceKeyPoint key;
+      key.candidate.point =
+          cv::Point(static_cast<int>(std::lround(anchor.point.x)),
+                    static_cast<int>(std::lround(anchor.point.y)));
+      key.candidate.normal =
+          anchor.scan_normal * static_cast<float>(anchor.domain_polarity);
+      key.candidate.source_scan_index = anchor.scan_index;
+      key.candidate.domain_polarity = anchor.domain_polarity;
+      key.direction = direction;
+      key.anchor_distance = 0.0f;
+      key.anchor_normal_distance = 0.0f;
+      key.anchor_slope_alignment = 1.0f;
+      key.anchor_normal_alignment = 1.0f;
+      const cv::Point2f local = NormalTraceLocalPoint(
+          key.candidate.point, centerX, centerY, cosAngle, sinAngle);
+      const float tangent = direction < 2 ? local.x : local.y;
+      key.bin = static_cast<int>(std::floor(tangent / binSize));
+      key.u = local.x;
+      key.v = local.y;
+      original.push_back(key);
+      ++evidence.anchor_prefilter_accepted_counts[direction];
+    }
+
+    // De-duplication is value-preserving: every group publishes one medoid
+    // that is an actual FindLine conclusion. No averaged/synthetic conclusion
+    // coordinate is allowed into the graph.
+    std::vector<std::vector<NormalTraceKeyPoint>> duplicateGroups;
+    for (const NormalTraceKeyPoint &key : original) {
+      bool assigned = false;
+      for (std::vector<NormalTraceKeyPoint> &group : duplicateGroups) {
+        for (const NormalTraceKeyPoint &member : group) {
+          const int dx = key.candidate.point.x - member.candidate.point.x;
+          const int dy = key.candidate.point.y - member.candidate.point.y;
+          if (dx * dx + dy * dy <= overlapRadius2) {
+            group.push_back(key);
+            assigned = true;
+            break;
+          }
+        }
+        if (assigned)
           break;
+      }
+      if (!assigned)
+        duplicateGroups.push_back({key});
+    }
+    const auto medoid = [](const std::vector<NormalTraceKeyPoint> &group) {
+      std::size_t best = 0;
+      double bestDistance = std::numeric_limits<double>::infinity();
+      for (std::size_t i = 0; i < group.size(); ++i) {
+        double distance = 0.0;
+        for (const NormalTraceKeyPoint &other : group)
+          distance += cv::norm(group[i].candidate.point - other.candidate.point);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = i;
         }
       }
-      if (!overlap)
-        retained.push_back(key);
-    }
+      return group[best];
+    };
+    std::vector<NormalTraceKeyPoint> retained;
+    retained.reserve(duplicateGroups.size());
+    for (const std::vector<NormalTraceKeyPoint> &group : duplicateGroups)
+      retained.push_back(medoid(group));
     evidence.domain_deduplicated_counts[direction] =
         static_cast<int>(retained.size());
     for (const NormalTraceKeyPoint &key : retained) {
@@ -402,33 +283,13 @@ bool BuildCompressedNormalTraceDomains(
     }
 
     std::map<int, std::vector<NormalTraceKeyPoint>> buckets;
-    for (NormalTraceKeyPoint key : retained) {
-      const cv::Point2f local = NormalTraceLocalPoint(
-          key.candidate.point, centerX, centerY, cosAngle, sinAngle);
-      const float tangent = direction < 2 ? local.x : local.y;
-      key.direction = direction;
-      key.bin = static_cast<int>(std::floor(tangent / binSize));
-      key.u = local.x;
-      key.v = local.y;
+    for (const NormalTraceKeyPoint &key : retained)
       buckets[key.bin].push_back(key);
-    }
     for (auto &entry : buckets) {
-      std::vector<NormalTraceKeyPoint> &bucket = entry.second;
-      std::sort(bucket.begin(), bucket.end(),
-                [](const NormalTraceKeyPoint &a, const NormalTraceKeyPoint &b) {
-                  if (a.anchor_normal_distance != b.anchor_normal_distance)
-                    return a.anchor_normal_distance < b.anchor_normal_distance;
-                  const float aAlignment =
-                      std::min(a.anchor_slope_alignment, a.anchor_normal_alignment);
-                  const float bAlignment =
-                      std::min(b.anchor_slope_alignment, b.anchor_normal_alignment);
-                  if (aAlignment != bAlignment)
-                    return aAlignment > bAlignment;
-                  return a.candidate.gradient > b.candidate.gradient;
-                });
-      const std::size_t retainCount = std::min<std::size_t>(3, bucket.size());
-      for (std::size_t i = 0; i < retainCount; ++i)
-        keypoints[direction].push_back(bucket[i]);
+      // XY compression also selects an original medoid. Dijkstra therefore
+      // returns only stable source conclusions; interpolation is a separate
+      // render/model derivative and never becomes measurement evidence.
+      keypoints[direction].push_back(medoid(entry.second));
     }
     const bool reverse = direction == 1 || direction == 2;
     std::sort(keypoints[direction].begin(), keypoints[direction].end(),
@@ -436,9 +297,8 @@ bool BuildCompressedNormalTraceDomains(
                         const NormalTraceKeyPoint &b) {
                 if (a.bin != b.bin)
                   return reverse ? a.bin > b.bin : a.bin < b.bin;
-                if (a.anchor_distance != b.anchor_distance)
-                  return a.anchor_distance < b.anchor_distance;
-                return a.candidate.gradient > b.candidate.gradient;
+                return a.candidate.source_scan_index <
+                       b.candidate.source_scan_index;
               });
     evidence.compressed_keypoint_counts[direction] =
         static_cast<int>(keypoints[direction].size());
@@ -471,8 +331,6 @@ bool TraceCompressedNormalTraceDomain(
   std::vector<int> previous(nodes.size(), -1);
   using QueueNode = std::pair<float, int>;
   std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<QueueNode>> queue;
-  const float gradientWeight =
-      std::max(1, cfg.dijkstra_gradient_cost_weight_permille) / 1000.0f;
   const float gapWeight =
       std::max(0, cfg.dijkstra_gap_cost_weight_permille) / 1000.0f;
   const float maxGap = static_cast<float>(std::max(
@@ -498,9 +356,9 @@ bool TraceCompressedNormalTraceDomain(
       std::clamp(cfg.ann_normal_deviation_deg, 1, 89)) *
       static_cast<float>(CV_PI / 180.0));
 
-  // ANN first establishes an edge-domain graph.  Dijkstra must not decide
-  // whether two pixels belong to the same physical edge: it only optimizes
-  // inside this filtered, connected domain graph.
+  // ANN establishes connectivity between value-preserving compressed
+  // FindLine conclusions. There are no image-derived pixels in this graph.
+  // Dijkstra may select/de-duplicate a track but cannot create a conclusion.
   NormalTraceAnnPointCloud cloud;
   cloud.points.reserve(nodes.size());
   for (const NormalTraceKeyPoint& node : nodes)
@@ -557,7 +415,9 @@ bool TraceCompressedNormalTraceDomain(
           std::abs(currentTangent.dot(edgeDirection));
       const float nextTangentAlignment =
           std::abs(nextTangent.dot(edgeDirection));
-      const float normalAlignment = std::abs(currentNormal.dot(nextNormal));
+      // Domain polarity is part of the original FindLine conclusion. Opposite
+      // signed normals are different semantic tracks and must never be joined.
+      const float normalAlignment = currentNormal.dot(nextNormal);
       const bool longBridge = gap > maxGap;
       const float requiredTangent =
           longBridge ? tangentCos : relaxedTangentCos;
@@ -761,9 +621,10 @@ bool TraceCompressedNormalTraceDomain(
         continue;
       const float gap = cv::norm(nodes[static_cast<std::size_t>(next)].candidate.point -
                                  nodes[static_cast<std::size_t>(current)].candidate.point);
-      const float normalTurn = 1.0f - std::abs(
+      const float normalTurn = 1.0f - std::clamp(
           nodes[static_cast<std::size_t>(current)].candidate.normal.dot(
-              nodes[static_cast<std::size_t>(next)].candidate.normal));
+              nodes[static_cast<std::size_t>(next)].candidate.normal),
+          -1.0f, 1.0f);
       const cv::Point2f currentNormal =
           nodes[static_cast<std::size_t>(current)].candidate.normal;
       const cv::Point2f currentTangent(-currentNormal.y, currentNormal.x);
@@ -774,17 +635,27 @@ bool TraceCompressedNormalTraceDomain(
       const float tangentMismatch =
           1.0f - std::abs(currentTangent.dot(edgeDirection));
       const float tangentSoftGate = tangentMismatch > (1.0f - tangentCos)
-                                        ? tangentMismatch
-                                        : tangentMismatch * 0.25f;
+                                         ? tangentMismatch
+                                         : tangentMismatch * 0.25f;
       const float normalSoftGate = normalTurn > (1.0f - normalCos)
                                        ? normalTurn
                                        : normalTurn * 0.25f;
-      const float cost = gradientWeight *
-                             (255.0f / std::max(1.0f, nodes[static_cast<std::size_t>(next)].candidate.gradient)) +
-                         gapWeight * gap +
+      const int skippedBins = std::max(
+          0, std::abs(nodes[static_cast<std::size_t>(next)].bin -
+                      nodes[static_cast<std::size_t>(current)].bin) -
+                 1);
+      // A Euclidean shortest path can have the same length whether it visits
+      // every conclusion or jumps across several bins. Penalize that jump so
+      // Dijkstra preserves consecutive source conclusions whenever available;
+      // a real missing bin can still be bridged within the ANN radius.
+      const float skippedBinCost =
+          static_cast<float>(skippedBins *
+                             std::max(1, cfg.xy_compression_bin_px)) *
+          0.75f;
+      const float cost = (1.0f + gapWeight) * gap +
                          (std::max(0, cfg.dijkstra_turn_cost_weight_permille) / 1000.0f) *
-                             (normalSoftGate + tangentSoftGate) +
-                         nodes[static_cast<std::size_t>(next)].anchor_distance * 0.05f;
+                             maxGap * (normalSoftGate + tangentSoftGate) +
+                         skippedBinCost;
       const float alternative = currentDistance + cost;
       if (alternative < distance[static_cast<std::size_t>(next)]) {
         distance[static_cast<std::size_t>(next)] = alternative;
@@ -810,98 +681,6 @@ bool TraceCompressedNormalTraceDomain(
   return trace.size() >= 2;
 }
 
-bool TraceNormalDomainCornerBridge(
-    const cv::Mat &gx, const cv::Mat &gy, const cv::Point &start,
-    const cv::Point &goal, const FastMatch::NormalTraceLearnConfig &cfg,
-    std::vector<cv::Point> &bridge, std::string &reason) {
-  bridge.clear();
-  if (start == goal) {
-    bridge.push_back(start);
-    return true;
-  }
-
-  // Corner transitions are solved on the original gradient domain rather
-  // than filled with a straight segment. The small corridor keeps this second
-  // Dijkstra pass local to the two ANN-classified side components.
-  const int margin = std::max(4, cfg.domain_overlap_radius_px * 2);
-  const int x0 = std::max(1, std::min(start.x, goal.x) - margin);
-  const int y0 = std::max(1, std::min(start.y, goal.y) - margin);
-  const int x1 = std::min(gx.cols - 2, std::max(start.x, goal.x) + margin);
-  const int y1 = std::min(gx.rows - 2, std::max(start.y, goal.y) + margin);
-  if (x0 > x1 || y0 > y1) {
-    reason = "CORNER_BRIDGE_DOMAIN_EMPTY";
-    return false;
-  }
-  const int width = x1 - x0 + 1;
-  const int height = y1 - y0 + 1;
-  const int nodeCount = width * height;
-  const auto indexOf = [x0, y0, width](const cv::Point &point) {
-    return (point.y - y0) * width + (point.x - x0);
-  };
-  const auto pointOf = [x0, y0, width](int index) {
-    return cv::Point(x0 + index % width, y0 + index / width);
-  };
-  const int startIndex = indexOf(start);
-  const int goalIndex = indexOf(goal);
-  std::vector<float> distance(static_cast<std::size_t>(nodeCount),
-                              std::numeric_limits<float>::infinity());
-  std::vector<int> previous(static_cast<std::size_t>(nodeCount), -1);
-  using QueueNode = std::pair<float, int>;
-  std::priority_queue<QueueNode, std::vector<QueueNode>,
-                      std::greater<QueueNode>> queue;
-  distance[static_cast<std::size_t>(startIndex)] = 0.0f;
-  queue.push({0.0f, startIndex});
-  int expanded = 0;
-  int finalIndex = -1;
-  static const int offsets[8][2] = {
-      {-1, -1}, {0, -1}, {1, -1}, {-1, 0},
-      {1, 0},   {-1, 1}, {0, 1},  {1, 1}};
-  while (!queue.empty()) {
-    const auto [currentDistance, currentIndex] = queue.top();
-    queue.pop();
-    if (currentDistance != distance[static_cast<std::size_t>(currentIndex)])
-      continue;
-    if (++expanded > std::max(64, cfg.dijkstra_max_nodes)) {
-      reason = "CORNER_BRIDGE_BUDGET_EXCEEDED";
-      return false;
-    }
-    if (currentIndex == goalIndex) {
-      finalIndex = currentIndex;
-      break;
-    }
-    const cv::Point current = pointOf(currentIndex);
-    for (const auto &offset : offsets) {
-      const cv::Point next(current.x + offset[0], current.y + offset[1]);
-      if (next.x < x0 || next.x > x1 || next.y < y0 || next.y > y1)
-        continue;
-      const int nextIndex = indexOf(next);
-      const float magnitude = std::hypot(gx.at<float>(next.y, next.x),
-                                         gy.at<float>(next.y, next.x));
-      if (nextIndex != goalIndex &&
-          magnitude < static_cast<float>(cfg.min_gradient))
-        continue;
-      const float stepCost = offset[0] != 0 && offset[1] != 0 ? 1.41421356f : 1.0f;
-      const float gradientCost =
-          255.0f / std::max(1.0f, magnitude);
-      const float alternative = currentDistance + stepCost + gradientCost;
-      if (alternative < distance[static_cast<std::size_t>(nextIndex)]) {
-        distance[static_cast<std::size_t>(nextIndex)] = alternative;
-        previous[static_cast<std::size_t>(nextIndex)] = currentIndex;
-        queue.push({alternative, nextIndex});
-      }
-    }
-  }
-  if (finalIndex < 0) {
-    reason = "CORNER_BRIDGE_PATH_MISSING";
-    return false;
-  }
-  for (int index = finalIndex; index >= 0;
-       index = previous[static_cast<std::size_t>(index)])
-    bridge.push_back(pointOf(index));
-  std::reverse(bridge.begin(), bridge.end());
-  return bridge.size() >= 2;
-}
-
 bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
                                int learn_y, int learn_w, int learn_h,
                                PointsShape &out_pattern, int &raw_count,
@@ -913,23 +692,20 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   evidence.executed = true;
   cv::Mat source_mat = image.getmat();
   if (source_mat.empty()) { evidence.reason = "IMAGE_EMPTY"; return false; }
-  cv::Mat gray;
-  if (source_mat.channels() == 1) gray = source_mat;
-  else cv::cvtColor(source_mat, gray, cv::COLOR_BGR2GRAY);
-  if (gray.empty()) { evidence.reason = "GRAY_CONVERSION_FAILED"; return false; }
 
   const FastMatch::NormalTraceLearnConfig &cfg = source.getnormaltraceconfig();
+  evidence.endpoint_spike_ratio_percent = cfg.endpoint_spike_ratio_percent;
+  evidence.junction_tangent_window_points =
+      cfg.junction_tangent_window_points;
+  evidence.junction_min_cross_angle_deg = cfg.junction_min_cross_angle_deg;
+  evidence.junction_max_extrapolation_percent =
+      cfg.junction_max_extrapolation_percent;
+  evidence.junction_join_spacing_multiplier_percent =
+      cfg.junction_join_spacing_multiplier_percent;
   const cv::Rect roi = cv::Rect(learn_x, learn_y, std::max(1, learn_w),
                                 std::max(1, learn_h)) &
-                       cv::Rect(0, 0, gray.cols, gray.rows);
+                       cv::Rect(0, 0, source_mat.cols, source_mat.rows);
   if (roi.width < 3 || roi.height < 3) { evidence.reason = "LEARN_ROI_TOO_SMALL"; return false; }
-  std::vector<NormalTraceCandidate> domain = BuildNormalTraceDomain(
-      gray, roi, std::max(1, cfg.min_gradient),
-      std::max(0, cfg.domain_overlap_radius_px), raw_count);
-  if (domain.empty()) { evidence.reason = "NO_GRADIENT_DOMAIN"; return false; }
-  cv::Mat gx, gy;
-  cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
-  cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
   const double angleRadians = source.getscanrotation() * CV_PI / 180.0;
   const double cosAngle = std::cos(angleRadians);
   const double sinAngle = std::sin(angleRadians);
@@ -938,23 +714,22 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   int availableSides = 0;
   const std::array<std::vector<NormalTraceAnchorFrame>, 4> anchors =
         CollectNormalTraceAnchors(source, availableSides);
+  for (const auto &directionAnchors : anchors)
+    raw_count += static_cast<int>(directionAnchors.size());
   evidence.directional_side_count = availableSides;
   if (availableSides != 4) {
-    evidence.reason = "DIRECTIONAL_ANCHOR_DOMAIN_MISSING";
+    evidence.reason = "DIRECTIONAL_SELECTED_ANCHORS_INSUFFICIENT";
     return false;
   }
   std::array<std::vector<NormalTraceKeyPoint>, 4> keypoints;
-  BuildCompressedNormalTraceDomains(domain, anchors, centerX, centerY,
-                                    cosAngle, sinAngle, cfg, keypoints,
-                                    evidence);
+  BuildCompressedNormalTraceDomains(anchors, centerX, centerY, cosAngle,
+                                    sinAngle, cfg, keypoints, evidence);
   deduplicated_count = static_cast<int>(evidence.domain_points.size());
   if (deduplicated_count < 4) {
     evidence.reason = "DEDUPLICATED_DOMAIN_TOO_SMALL";
     return false;
   }
   std::vector<cv::Point> trace;
-  double coveredGradientPoints = 0.0;
-  double totalGradientPoints = 0.0;
   const int traversal[4] = {0, 3, 1, 2}; // Top -> Right -> Bottom -> Left.
   std::array<std::vector<cv::Point>, 4> segmentTraces;
   for (int segment = 0; segment < 4; ++segment) {
@@ -973,6 +748,45 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     }
   }
 
+  // A directional scan may hit the adjacent physical edge after passing a
+  // corner. This leaves an isolated endpoint jump although the main Dijkstra
+  // track is valid. Remove only those endpoint references, using the track's
+  // own median spacing; never synthesize a replacement conclusion.
+  for (int segment = 0; segment < 4; ++segment) {
+    std::vector<cv::Point> &points = segmentTraces[segment];
+    if (points.size() < 4)
+      continue;
+    std::vector<double> gaps;
+    gaps.reserve(points.size() - 1);
+    for (std::size_t index = 1; index < points.size(); ++index) {
+      const double gap = cv::norm(points[index] - points[index - 1]);
+      if (gap > 0.0)
+        gaps.push_back(gap);
+    }
+    if (gaps.empty())
+      continue;
+    const std::size_t middle = gaps.size() / 2;
+    std::nth_element(gaps.begin(), gaps.begin() + middle, gaps.end());
+    const double medianGap = gaps[middle];
+    const double endpointJumpLimit = std::max(
+        static_cast<double>(std::max(1, cfg.xy_compression_bin_px) * 3),
+        medianGap *
+            static_cast<double>(cfg.endpoint_spike_ratio_percent) / 100.0);
+    int pruned = 0;
+    while (points.size() >= 4 &&
+           cv::norm(points[1] - points[0]) > endpointJumpLimit) {
+      points.erase(points.begin());
+      ++pruned;
+    }
+    while (points.size() >= 4 &&
+           cv::norm(points.back() - points[points.size() - 2]) >
+               endpointJumpLimit) {
+      points.pop_back();
+      ++pruned;
+    }
+    evidence.endpoint_spike_pruned_counts[traversal[segment]] = pruned;
+  }
+
   // Each directional ANN component may extend beyond a physical corner or
   // cross a nearby texture. Build several evidence-scored joins per corner,
   // then choose all four joins together. A fixed endpoint fraction is brittle
@@ -986,8 +800,29 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   };
   std::array<int, 4> incomingIndex{};
   std::array<int, 4> outgoingIndex{};
-  const double allowedJoinGap = std::max(
+  const double baseAllowedJoinGap = std::max(
       8.0, static_cast<double>(cfg.anchor_neighborhood_radius_px) * 0.75);
+  const auto sourceTrackLengthAndMedianGap =
+      [](const std::vector<NormalTraceKeyPoint> &points) {
+        double length = 0.0;
+        std::vector<double> gaps;
+        gaps.reserve(points.size());
+        for (std::size_t i = 1; i < points.size(); ++i) {
+          const double gap = cv::norm(points[i].candidate.point -
+                                      points[i - 1].candidate.point);
+          if (gap > 0.0) {
+            length += gap;
+            gaps.push_back(gap);
+          }
+        }
+        double medianGap = 0.0;
+        if (!gaps.empty()) {
+          const std::size_t middle = gaps.size() / 2;
+          std::nth_element(gaps.begin(), gaps.begin() + middle, gaps.end());
+          medianGap = gaps[middle];
+        }
+        return std::pair<double, double>(length, medianGap);
+      };
   const auto unitTangent = [](const std::vector<cv::Point> &points,
                               std::size_t index) {
     const std::size_t before = index > 1 ? index - 2 : 0;
@@ -1016,6 +851,23 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     const int next = (segment + 1) % 4;
     const std::vector<cv::Point> &currentTrace = segmentTraces[segment];
     const std::vector<cv::Point> &nextTrace = segmentTraces[next];
+    const auto [currentLength, currentMedianGap] =
+        sourceTrackLengthAndMedianGap(keypoints[traversal[segment]]);
+    const auto [nextLength, nextMedianGap] =
+        sourceTrackLengthAndMedianGap(keypoints[traversal[next]]);
+    // Directional gauges commonly stop before a physical corner. The join
+    // radius follows the observed conclusion sampling/span instead of a fixed
+    // pixel constant. It only permits edges between existing conclusions.
+    const double samplingAllowance =
+        std::max(currentMedianGap, nextMedianGap) *
+        static_cast<double>(cfg.junction_join_spacing_multiplier_percent) /
+        100.0;
+    const double spanAllowance =
+        std::min(currentLength, nextLength) * 0.18;
+    const double allowedJoinGap =
+        std::max(baseAllowedJoinGap,
+                 std::max(samplingAllowance, spanAllowance));
+    evidence.domain_join_allowed_gap_px[segment] = allowedJoinGap;
     for (std::size_t currentIndex = 0;
          currentIndex < segmentTraces[segment].size(); ++currentIndex) {
       for (std::size_t nextIndex = 0;
@@ -1048,6 +900,9 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
                   0.5 +
               (1.0 - std::clamp(bridge.dot(nextTangent), -1.0, 1.0)) *
                   0.5;
+          if (currentTangent.dot(bridge) < -0.25 ||
+              bridge.dot(nextTangent) < -0.25)
+            continue;
         }
         const int currentDirection = traversal[segment];
         const int nextDirection = traversal[next];
@@ -1093,7 +948,8 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     if (joinCandidates[segment].empty()) {
       evidence.reason = "DOMAIN_JOIN_CANDIDATE_MISSING_" +
                         std::to_string(segment) + "_allowed=" +
-                        std::to_string(allowedJoinGap);
+                        std::to_string(
+                            evidence.domain_join_allowed_gap_px[segment]);
       return false;
     }
   }
@@ -1128,11 +984,20 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
           double cycleScore = j0.score + j1.score + j2.score + j3.score;
           // Prefer a cycle that retains the supported side traces; this is a
           // soft evidence term, not a fixed shape fraction or convexity rule.
-          cycleScore += allowedJoinGap * (4.0 - retainedCoverage) * 0.35;
+          const double averageAllowedJoinGap =
+              (evidence.domain_join_allowed_gap_px[0] +
+               evidence.domain_join_allowed_gap_px[1] +
+               evidence.domain_join_allowed_gap_px[2] +
+               evidence.domain_join_allowed_gap_px[3]) /
+              4.0;
+          cycleScore +=
+              averageAllowedJoinGap * (4.0 - retainedCoverage) * 0.35;
           if (cycleScore < bestCycleScore) {
             bestCycleScore = cycleScore;
             incomingIndex = cycleIncoming;
             outgoingIndex = cycleOutgoing;
+            for (int join = 0; join < 4; ++join)
+              evidence.domain_join_selected_gap_px[join] = cycle[join].gap;
           }
         }
   if (!std::isfinite(bestCycleScore)) {
@@ -1171,8 +1036,10 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   const double minimumRetainedAnchorCoverage = std::max(
       0.35,
       std::min(0.75,
-               static_cast<double>(cfg.ann_min_component_coverage_percent) /
-                   100.0 * 0.75));
+                static_cast<double>(cfg.ann_min_component_coverage_percent) /
+                    100.0 * 0.75));
+  int retainedAnchorSupportedTotal = 0;
+  int retainedAnchorTotal = 0;
   for (int segment = 0; segment < 4; ++segment) {
     const int direction = traversal[segment];
     int supportedAnchors = 0;
@@ -1192,6 +1059,8 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
             ? 0.0
             : static_cast<double>(supportedAnchors) /
                   static_cast<double>(anchors[direction].size());
+    retainedAnchorSupportedTotal += supportedAnchors;
+    retainedAnchorTotal += static_cast<int>(anchors[direction].size());
     if (retainedAnchorCoverage < minimumRetainedAnchorCoverage) {
       evidence.reason =
           "DOMAIN_JOIN_ANCHOR_COVERAGE_LOW_direction=" +
@@ -1202,130 +1071,249 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
       return false;
     }
   }
+  evidence.selected_anchor_coverage = retainedAnchorTotal > 0
+      ? static_cast<double>(retainedAnchorSupportedTotal) /
+            static_cast<double>(retainedAnchorTotal)
+      : 0.0;
+  evidence.gradient_coverage = evidence.selected_anchor_coverage;
 
-  // Chain each adjacent pair through the real local gradient domain. This is
-
-  // a second Dijkstra stage at the corners, not visual interpolation: every
-  // emitted point must be supported by the source-image gradient domain.
+  // Concatenate the four Dijkstra-selected tracks as references to original
+  // FindLine conclusions. Dijkstra never emits a coordinate not present in a
+  // directional selected_point_by_scan list.
+  std::vector<NormalTraceSourceConclusion> conclusionPath;
   for (int segment = 0; segment < 4; ++segment) {
-    const int next = (segment + 1) % 4;
-    if (retainedSegments[segment].empty() || retainedSegments[next].empty()) {
-      evidence.reason = "CORNER_BRIDGE_ENDPOINT_MISSING_" +
+    if (retainedSegments[segment].empty()) {
+      evidence.reason = "DIRECTIONAL_SELECTED_PATH_EMPTY_" +
                         std::to_string(segment);
       return false;
     }
-    if (trace.empty())
-      trace.push_back(retainedSegments[segment].front());
-    for (std::size_t pointIndex = 1;
-         pointIndex < retainedSegments[segment].size(); ++pointIndex) {
-      std::vector<cv::Point> segmentBridge;
-      std::string segmentBridgeReason;
-      if (!TraceNormalDomainCornerBridge(
-              gx, gy, retainedSegments[segment][pointIndex - 1],
-              retainedSegments[segment][pointIndex], cfg, segmentBridge,
-              segmentBridgeReason)) {
-        evidence.reason = "SEGMENT_" + std::to_string(segment) +
-                          "_BRIDGE_" + std::to_string(pointIndex) + "_" +
-                          segmentBridgeReason;
+    const int direction = traversal[segment];
+    for (const cv::Point &point : retainedSegments[segment]) {
+      const auto found = std::find_if(
+          keypoints[direction].begin(), keypoints[direction].end(),
+          [&point](const NormalTraceKeyPoint &key) {
+            return key.candidate.point == point;
+          });
+      if (found == keypoints[direction].end()) {
+        evidence.reason = "DIJKSTRA_SOURCE_REFERENCE_MISSING_direction=" +
+                          std::to_string(direction);
         return false;
       }
-      trace.insert(trace.end(), segmentBridge.begin() + 1,
-                   segmentBridge.end());
+      if (!conclusionPath.empty() && conclusionPath.back().point == point)
+        continue;
+      conclusionPath.push_back(
+          {point, found->candidate.normal, direction,
+           found->candidate.source_scan_index});
     }
-    std::vector<cv::Point> bridge;
-    std::string bridgeReason;
-    if (!TraceNormalDomainCornerBridge(
-            gx, gy, retainedSegments[segment].back(),
-            retainedSegments[next].front(), cfg, bridge, bridgeReason)) {
-      evidence.reason = "CORNER_" + std::to_string(segment) + "_" +
-                        bridgeReason;
-      return false;
-    }
-    // The start already belongs to the current segment. The goal becomes the
-    // next segment's first point; for the last corner it is the real closure
-    // point and is deliberately retained.
-    trace.insert(trace.end(), bridge.begin() + 1, bridge.end());
   }
-  // Independent local bridge solves can meet an already visited pixel and
-  // create A->B->A hooks or a larger self-loop.  Erase those loops before
-  // computing normals.  The operation preserves arbitrary curvature and only
-  // removes the section whose endpoints are the same image pixel.
-  const int tracePointCountBeforeLoopErasure = static_cast<int>(trace.size());
-  const bool traceWasClosed =
-      trace.size() >= 2 && cv::norm(trace.front() - trace.back()) <= 1.5;
-  const std::size_t sourceCount =
-      traceWasClosed && trace.size() > 1 ? trace.size() - 1 : trace.size();
-  std::vector<cv::Point> loopErasedTrace;
-  std::map<std::pair<int, int>, std::size_t> visitedTracePixels;
-  // Only erase a local hook. A repeated pixel far back in the chain can be a
-  // legitimate closure/crossing on a complex outline. Treating every repeat
-  // as a stack loop can collapse a complete trace after a one-pixel ROI edit.
-  const std::size_t localLoopLimit = static_cast<std::size_t>(std::max(
-      4, cfg.dijkstra_max_trace_gap_px * 2 + cfg.xy_compression_bin_px));
-  for (std::size_t index = 0; index < sourceCount; ++index) {
-    const cv::Point &point = trace[index];
-    const std::pair<int, int> key(point.x, point.y);
-    const auto found = visitedTracePixels.find(key);
-    if (found == visitedTracePixels.end()) {
-      visitedTracePixels[key] = loopErasedTrace.size();
-      loopErasedTrace.push_back(point);
-      continue;
-    }
-    const std::size_t keepThrough = found->second;
-    const std::size_t loopSpan = loopErasedTrace.size() - keepThrough;
-    if (loopSpan <= localLoopLimit) {
-      while (loopErasedTrace.size() > keepThrough + 1) {
-        const cv::Point removed = loopErasedTrace.back();
-        visitedTracePixels.erase({removed.x, removed.y});
-        loopErasedTrace.pop_back();
-      }
-      continue;
-    }
-    // Preserve non-local topology and use the latest occurrence as the basis
-    // for detecting a subsequent local A-B-A hook.
-    visitedTracePixels[key] = loopErasedTrace.size();
-    loopErasedTrace.push_back(point);
+  if (conclusionPath.size() < 4) {
+    evidence.reason = "DIJKSTRA_SELECTED_CONCLUSIONS_TOO_FEW";
+    return false;
   }
-  if (traceWasClosed && !loopErasedTrace.empty())
-    loopErasedTrace.push_back(loopErasedTrace.front());
-  trace.swap(loopErasedTrace);
-  evidence.loop_erased_point_count =
-      std::max(0, tracePointCountBeforeLoopErasure -
-                      static_cast<int>(trace.size()));
+  evidence.dijkstra_trace_points.reserve(conclusionPath.size());
+  for (const NormalTraceSourceConclusion &sourceConclusion : conclusionPath) {
+    evidence.dijkstra_trace_points.push_back(
+        {static_cast<double>(sourceConclusion.point.x),
+         static_cast<double>(sourceConclusion.point.y)});
+    evidence.dijkstra_source_directions.push_back(
+        sourceConclusion.direction);
+    evidence.dijkstra_source_scans.push_back(sourceConclusion.scan_index);
+  }
 
-  trace_count = static_cast<int>(trace.size());
-  evidence.dijkstra_trace_points.reserve(trace.size());
-  for (const cv::Point& point : trace)
-    evidence.dijkstra_trace_points.push_back({static_cast<double>(point.x),
-                                               static_cast<double>(point.y)});
-  if (trace_count < std::max(2, cfg.trace_min_length_px)) {
-    evidence.reason = "TRACE_TOO_SHORT"; return false;
+  // Stretch each selected source segment and reconstruct its junction with the
+  // next segment. A direct endpoint chord cuts inside a real corner, so first
+  // extrapolate robust endpoint tangents to their constrained intersection.
+  // When the tangents are nearly parallel or extrapolate too far, use a cubic
+  // tangent blend. Both are derived geometry, never new conclusions.
+  std::array<cv::Point2f, 4> derivedJunctionCenters{};
+  const auto appendStretchedSegment = [&trace](const cv::Point &from,
+                                                 const cv::Point &to) {
+    const double length = cv::norm(to - from);
+    const int steps = std::max(1, static_cast<int>(std::ceil(length)));
+    for (int stepIndex = trace.empty() ? 0 : 1; stepIndex <= steps;
+         ++stepIndex) {
+      const double t = static_cast<double>(stepIndex) /
+                       static_cast<double>(steps);
+      const cv::Point point(
+          static_cast<int>(std::lround(from.x + (to.x - from.x) * t)),
+          static_cast<int>(std::lround(from.y + (to.y - from.y) * t)));
+      if (trace.empty() || trace.back() != point)
+        trace.push_back(point);
+    }
+  };
+  const auto endpointTangent = [](const std::vector<cv::Point> &points) {
+    cv::Point2f tangent(0.0f, 0.0f);
+    if (points.size() < 2)
+      return tangent;
+    for (std::size_t index = 1; index < points.size(); ++index) {
+      cv::Point2f delta = points[index] - points[index - 1];
+      const float length = std::sqrt(delta.dot(delta));
+      if (length > 1e-6f)
+        tangent += delta * (1.0f / length);
+    }
+    const float length = std::sqrt(tangent.dot(tangent));
+    if (length > 1e-6f)
+      tangent *= 1.0f / length;
+    return tangent;
+  };
+  const auto endpointWindow = [&cfg](const std::vector<cv::Point> &points,
+                                     bool atEnd) {
+    const std::size_t count = std::min(
+        static_cast<std::size_t>(cfg.junction_tangent_window_points),
+        points.size());
+    if (atEnd)
+      return std::vector<cv::Point>(points.end() - count, points.end());
+    return std::vector<cv::Point>(points.begin(), points.begin() + count);
+  };
+  const auto cross2d = [](const cv::Point2f &a, const cv::Point2f &b) {
+    return a.x * b.y - a.y * b.x;
+  };
+  const auto appendTangentBlend = [&trace](
+      const cv::Point2f &from, const cv::Point2f &to,
+      const cv::Point2f &fromTangent, const cv::Point2f &toTangent,
+      double allowedGap) {
+    const double gap = cv::norm(to - from);
+    const float handle = static_cast<float>(
+        std::min(std::max(2.0, gap * 0.35), std::max(4.0, allowedGap * 0.5)));
+    const cv::Point2f control1 = from + fromTangent * handle;
+    const cv::Point2f control2 = to - toTangent * handle;
+    const int steps = std::max(2, static_cast<int>(std::ceil(gap * 1.5)));
+    for (int stepIndex = trace.empty() ? 0 : 1; stepIndex <= steps;
+         ++stepIndex) {
+      const float t = static_cast<float>(stepIndex) /
+                      static_cast<float>(steps);
+      const float oneMinusT = 1.0f - t;
+      const cv::Point2f point =
+          from * (oneMinusT * oneMinusT * oneMinusT) +
+          control1 * (3.0f * oneMinusT * oneMinusT * t) +
+          control2 * (3.0f * oneMinusT * t * t) +
+          to * (t * t * t);
+      const cv::Point rounded(static_cast<int>(std::lround(point.x)),
+                              static_cast<int>(std::lround(point.y)));
+      if (trace.empty() || trace.back() != rounded)
+        trace.push_back(rounded);
+    }
+  };
+  const auto appendIntersectionGuidedBlend = [&trace](
+      const cv::Point2f &from, const cv::Point2f &control,
+      const cv::Point2f &to) {
+    const double length = cv::norm(control - from) + cv::norm(to - control);
+    // A quadratic Bezier can move up to twice the average arc step near an
+    // endpoint. Sample at 2x control-polygon length so integer rasterization
+    // remains 8-connected (maximum consecutive step <= sqrt(2)).
+    const int steps =
+        std::max(2, static_cast<int>(std::ceil(length * 2.0)));
+    for (int stepIndex = trace.empty() ? 0 : 1; stepIndex <= steps;
+         ++stepIndex) {
+      const float t = static_cast<float>(stepIndex) /
+                      static_cast<float>(steps);
+      const float oneMinusT = 1.0f - t;
+      const cv::Point2f point = from * (oneMinusT * oneMinusT) +
+                                control * (2.0f * oneMinusT * t) +
+                                to * (t * t);
+      const cv::Point rounded(static_cast<int>(std::lround(point.x)),
+                              static_cast<int>(std::lround(point.y)));
+      if (trace.empty() || trace.back() != rounded)
+        trace.push_back(rounded);
+    }
+  };
+  evidence.derived_junction_points.reserve(4);
+  for (int segment = 0; segment < 4; ++segment) {
+    const int next = (segment + 1) % 4;
+    const std::vector<cv::Point> &currentPoints = retainedSegments[segment];
+    const std::vector<cv::Point> &nextPoints = retainedSegments[next];
+    if (trace.empty())
+      appendStretchedSegment(currentPoints.front(), currentPoints.front());
+    for (std::size_t index = 1; index < currentPoints.size(); ++index)
+      appendStretchedSegment(currentPoints[index - 1], currentPoints[index]);
+
+    const cv::Point2f from = currentPoints.back();
+    const cv::Point2f to = nextPoints.front();
+    const cv::Point2f fromTangent =
+        endpointTangent(endpointWindow(currentPoints, true));
+    const cv::Point2f toTangent =
+        endpointTangent(endpointWindow(nextPoints, false));
+    const float denominator = cross2d(fromTangent, toTangent);
+    const double crossAngleDeg =
+        std::asin(std::clamp(std::abs(static_cast<double>(denominator)),
+                            0.0, 1.0)) *
+        180.0 / CV_PI;
+    evidence.derived_junction_cross_angle_deg[segment] = crossAngleDeg;
+    const double allowedGap = evidence.domain_join_allowed_gap_px[segment];
+    const double maximumExtrapolation = std::max(
+        8.0, allowedGap *
+                 static_cast<double>(cfg.junction_max_extrapolation_percent) /
+                 100.0);
+    bool validIntersection = std::abs(denominator) > 1e-4f;
+    cv::Point2f junction = (from + to) * 0.5f;
+    double currentExtrapolation = 0.0;
+    double nextExtrapolation = 0.0;
+    if (validIntersection) {
+      const cv::Point2f delta = to - from;
+      currentExtrapolation = cross2d(delta, toTangent) / denominator;
+      const double nextParameter = cross2d(delta, fromTangent) / denominator;
+      nextExtrapolation = -nextParameter;
+      junction = from + fromTangent *
+                            static_cast<float>(currentExtrapolation);
+      validIntersection =
+          currentExtrapolation >= -2.0 && nextExtrapolation >= -2.0 &&
+          currentExtrapolation <= maximumExtrapolation &&
+          nextExtrapolation <= maximumExtrapolation &&
+          junction.x >= roi.x - maximumExtrapolation &&
+          junction.y >= roi.y - maximumExtrapolation &&
+          junction.x <= roi.x + roi.width + maximumExtrapolation &&
+          junction.y <= roi.y + roi.height + maximumExtrapolation;
+    }
+    const bool useIntersection =
+        validIntersection &&
+        crossAngleDeg >=
+            static_cast<double>(cfg.junction_min_cross_angle_deg);
+    if (useIntersection) {
+      const cv::Point rounded(static_cast<int>(std::lround(junction.x)),
+                              static_cast<int>(std::lround(junction.y)));
+      appendStretchedSegment(currentPoints.back(), rounded);
+      appendStretchedSegment(rounded, nextPoints.front());
+      evidence.derived_junction_modes[segment] = 1;
+    } else {
+      if (validIntersection) {
+        appendIntersectionGuidedBlend(from, junction, to);
+      } else {
+        appendTangentBlend(from, to, fromTangent, toTangent, allowedGap);
+        junction = (from + to) * 0.5f;
+        currentExtrapolation = 0.0;
+        nextExtrapolation = 0.0;
+      }
+      evidence.derived_junction_modes[segment] = 2;
+    }
+    derivedJunctionCenters[segment] = junction;
+    evidence.derived_junction_current_extrapolation_px[segment] =
+        currentExtrapolation;
+    evidence.derived_junction_next_extrapolation_px[segment] =
+        nextExtrapolation;
+    evidence.derived_junction_points.push_back(
+        {static_cast<double>(junction.x), static_cast<double>(junction.y)});
   }
-  evidence.closure_error_px =
-      cv::norm(trace.front() - trace.back());
+  if (!trace.empty() && trace.back() != trace.front())
+    trace.push_back(trace.front());
+  evidence.loop_erased_point_count = 0;
+  trace_count = static_cast<int>(trace.size());
+  evidence.derived_trace_points.reserve(trace.size());
+  for (const cv::Point &point : trace)
+    evidence.derived_trace_points.push_back(
+        {static_cast<double>(point.x), static_cast<double>(point.y)});
+  if (trace_count < std::max(2, cfg.trace_min_length_px)) {
+    evidence.reason = "DERIVED_TRACE_TOO_SHORT";
+    return false;
+  }
+  evidence.closure_error_px = cv::norm(trace.front() - trace.back());
   evidence.max_consecutive_gap_px = 0.0;
-  for (std::size_t index = 1; index < trace.size(); ++index) {
+  for (std::size_t index = 1; index < trace.size(); ++index)
     evidence.max_consecutive_gap_px = std::max(
         evidence.max_consecutive_gap_px,
         cv::norm(trace[index] - trace[index - 1]));
-    const cv::Point &point = trace[index];
-    const float magnitude =
-        std::hypot(gx.at<float>(point.y, point.x),
-                   gy.at<float>(point.y, point.x));
-    coveredGradientPoints +=
-        magnitude >= static_cast<float>(cfg.min_gradient) ? 1.0 : 0.0;
-    totalGradientPoints += 1.0;
-  }
-  evidence.gradient_coverage = totalGradientPoints > 0.0
-                                   ? coveredGradientPoints / totalGradientPoints
-                                   : 0.0;
   if (evidence.trace_segment_count != 4 || evidence.closure_error_px > 1.5 ||
       evidence.max_consecutive_gap_px > 1.5) {
-    evidence.reason = "TRACE_NOT_CLOSED";
-    return false;
-  }
-  if (evidence.gradient_coverage < 0.50) {
-    evidence.reason = "TRACE_GRADIENT_COVERAGE_LOW";
+    evidence.reason = "DERIVED_TRACE_NOT_CLOSED";
     return false;
   }
 
@@ -1333,20 +1321,12 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   const int step = std::max(1, cfg.tangent_sample_step_px);
   const float angular_limit = std::sin(static_cast<float>(std::clamp(cfg.normal_angle_tolerance_deg, 1, 89)) *
                                        static_cast<float>(CV_PI / 180.0));
-  const int closedCount = trace_count > 1 && trace.front() == trace.back()
-                              ? trace_count - 1
-                              : trace_count;
-  std::array<cv::Point2f, 4> cornerCenters{};
-  for (int segment = 0; segment < 4; ++segment) {
-    const int next = (segment + 1) % 4;
-    const cv::Point &from = retainedSegments[segment].back();
-    const cv::Point &to = retainedSegments[next].front();
-    cornerCenters[segment] = cv::Point2f(
-        static_cast<float>(from.x + to.x) * 0.5f,
-        static_cast<float>(from.y + to.y) * 0.5f);
-  }
+  const int closedCount = static_cast<int>(conclusionPath.size());
+  const std::array<cv::Point2f, 4> &cornerCenters = derivedJunctionCenters;
   for (int i = 0; i < closedCount; i += step) {
-    const cv::Point &p = trace[static_cast<size_t>(i)];
+    const NormalTraceSourceConclusion &sourceConclusion =
+        conclusionPath[static_cast<size_t>(i)];
+    const cv::Point &p = sourceConclusion.point;
     bool nearCorner = false;
     for (const cv::Point2f &corner : cornerCenters) {
       if (cfg.corner_rejection_radius_px <= 0)
@@ -1362,43 +1342,63 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
       ++evidence.normal_pair_corner_rejected_count;
       continue;
     }
-    const int before = (i - step + closedCount) % closedCount;
-    const int after = (i + step) % closedCount;
-    cv::Point2f tangent(
-        static_cast<float>(trace[static_cast<size_t>(after)].x -
-                           trace[static_cast<size_t>(before)].x),
-        static_cast<float>(trace[static_cast<size_t>(after)].y -
-                           trace[static_cast<size_t>(before)].y));
+    int before = -1;
+    for (int candidate = i - 1; candidate >= 0; --candidate) {
+      if (conclusionPath[static_cast<size_t>(candidate)].direction !=
+          sourceConclusion.direction)
+        break;
+      before = candidate;
+      break;
+    }
+    int after = -1;
+    for (int candidate = i + 1; candidate < closedCount; ++candidate) {
+      if (conclusionPath[static_cast<size_t>(candidate)].direction !=
+          sourceConclusion.direction)
+        break;
+      after = candidate;
+      break;
+    }
+    cv::Point2f tangent;
+    if (before >= 0 && after >= 0) {
+      tangent =
+          conclusionPath[static_cast<size_t>(after)].point -
+          conclusionPath[static_cast<size_t>(before)].point;
+    } else if (after >= 0) {
+      tangent =
+          conclusionPath[static_cast<size_t>(after)].point - p;
+    } else if (before >= 0) {
+      tangent =
+          p - conclusionPath[static_cast<size_t>(before)].point;
+    } else {
+      ++evidence.normal_pair_binding_miss_count;
+      continue;
+    }
     const float tangent_length = std::sqrt(tangent.dot(tangent));
-    const float nx0 = gx.at<float>(p.y, p.x), ny0 = gy.at<float>(p.y, p.x);
-    const float normal_length = std::hypot(nx0, ny0);
-    if (tangent_length < 1.0f || normal_length < static_cast<float>(cfg.min_gradient)) continue;
+    if (tangent_length < 1.0f)
+      continue;
     tangent *= 1.0f / tangent_length;
-    const cv::Point2f gradientNormal(nx0 / normal_length,
-                                     ny0 / normal_length);
-    // Sobel validates that this is an edge; it no longer owns A/B polarity.
-    if (std::abs(gradientNormal.dot(tangent)) > angular_limit) continue;
-    cv::Point2f normal;
-    int boundDirection = -1;
-    int boundScan = -1;
-    double boundDistance = 0.0;
-    if (!ResolveNormalTraceFindLineNormal(
-            source, p, cfg.normal_polarity, normal, boundDirection,
-            boundScan, boundDistance)) {
+    const cv::Point2f domainNormal = sourceConclusion.domain_normal;
+    const int boundDirection = sourceConclusion.direction;
+    const int boundScan = sourceConclusion.scan_index;
+    if (boundDirection < 0 || boundDirection >= 4 || boundScan < 0) {
       ++evidence.normal_pair_binding_miss_count;
       continue;
     }
-    if (std::abs(normal.dot(tangent)) > angular_limit) {
+    if (std::abs(domainNormal.dot(tangent)) > angular_limit) {
       ++evidence.normal_pair_binding_miss_count;
       continue;
     }
+    cv::Point2f normal(-tangent.y, tangent.x);
+    if (normal.dot(domainNormal) < 0.0f)
+      normal *= -1.0f;
     const int offset = std::max(1, cfg.normal_pair_offset_px);
     const cv::Point2f a(static_cast<float>(p.x) + normal.x * offset,
                         static_cast<float>(p.y) + normal.y * offset);
     const cv::Point2f b(static_cast<float>(p.x) - normal.x * offset,
                         static_cast<float>(p.y) - normal.y * offset);
     if (a.x < 0 || a.y < 0 || b.x < 0 || b.y < 0 ||
-        a.x >= gray.cols || b.x >= gray.cols || a.y >= gray.rows || b.y >= gray.rows) continue;
+        a.x >= source_mat.cols || b.x >= source_mat.cols ||
+        a.y >= source_mat.rows || b.y >= source_mat.rows) continue;
     Standard_Real ax = static_cast<Standard_Real>(std::lround(a.x));
     Standard_Real ay = static_cast<Standard_Real>(std::lround(a.y));
     Standard_Real bx = static_cast<Standard_Real>(std::lround(b.x));
@@ -1407,6 +1407,10 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     out_pattern.addpointb(bx, by);
     evidence.normal_pair_a.push_back({static_cast<double>(ax), static_cast<double>(ay)});
     evidence.normal_pair_b.push_back({static_cast<double>(bx), static_cast<double>(by)});
+    evidence.normal_pair_source_points.push_back(
+        {static_cast<double>(p.x), static_cast<double>(p.y)});
+    evidence.normal_pair_source_directions.push_back(boundDirection);
+    evidence.normal_pair_source_scans.push_back(boundScan);
     ++evidence.normal_pair_findline_bound_count;
     if (boundDirection >= 0 && boundDirection < 4)
       ++evidence.normal_pair_counts_by_direction[boundDirection];
@@ -3017,8 +3021,9 @@ void FastMatch::Learn(Image &image) {
   runDirectionalFindLineProbes(image);
 
   // Normal-Trace is the operator-selected continuation of the four
-  // directional probes: de-duplicate the edge domain, run the Dijkstra trace,
-  // then construct A/B samples from the local line normal. It must run before
+  // directional probes: value-preserving de-duplication of selected FindLine
+  // conclusions, Dijkstra source-point routing, then domain-polarity A/B pairs.
+  // It must run before
   // the directional compatibility template below; otherwise that branch can
   // return early and leave Normal-Trace evidence permanently at NOT_RUN.
   if (m_normal_trace_config.enabled) {
@@ -3026,8 +3031,7 @@ void FastMatch::Learn(Image &image) {
         "FastMatch", "learn_normal_trace_config", "effective",
         "overlap=" +
             std::to_string(m_normal_trace_config.domain_overlap_radius_px) +
-            " min_gradient=" +
-            std::to_string(m_normal_trace_config.min_gradient) +
+         " source=findline_selected_conclusions image_reprocessing=0" +
             " max_nodes=" +
             std::to_string(m_normal_trace_config.dijkstra_max_nodes) +
             " pair_offset=" +
@@ -3053,7 +3057,23 @@ void FastMatch::Learn(Image &image) {
              std::to_string(
                  m_normal_trace_config.ann_normal_deviation_deg) +
              " xy_bin=" +
-             std::to_string(m_normal_trace_config.xy_compression_bin_px));
+             std::to_string(m_normal_trace_config.xy_compression_bin_px) +
+             " endpoint_spike_ratio_percent=" +
+             std::to_string(
+                 m_normal_trace_config.endpoint_spike_ratio_percent) +
+             " junction_tangent_points=" +
+             std::to_string(
+                 m_normal_trace_config.junction_tangent_window_points) +
+             " junction_min_cross_angle_deg=" +
+             std::to_string(
+                 m_normal_trace_config.junction_min_cross_angle_deg) +
+             " junction_max_extrapolation_percent=" +
+             std::to_string(
+                 m_normal_trace_config.junction_max_extrapolation_percent) +
+             " junction_join_spacing_multiplier_percent=" +
+             std::to_string(
+                 m_normal_trace_config
+                     .junction_join_spacing_multiplier_percent));
     PointsShape normal_trace_pattern;
     if (LearnPatternByNormalTrace(
             image, *this, input_learn_roi_x, input_learn_roi_y,
@@ -3078,8 +3098,12 @@ void FastMatch::Learn(Image &image) {
                   " max_step_px=" +
                   std::to_string(
                       m_normal_trace_evidence.max_consecutive_gap_px) +
-                   " coverage=" +
-                   std::to_string(m_normal_trace_evidence.gradient_coverage) +
+                   " selected_anchor_coverage=" +
+                   std::to_string(
+                       m_normal_trace_evidence.selected_anchor_coverage) +
+                   " generated_conclusions=" +
+                   std::to_string(
+                       m_normal_trace_evidence.generated_conclusion_count) +
                    " findline_bound_pairs=" +
                    std::to_string(
                        m_normal_trace_evidence.normal_pair_findline_bound_count) +
@@ -3104,7 +3128,7 @@ void FastMatch::Learn(Image &image) {
                    "," +
                     std::to_string(m_normal_trace_evidence
                                        .normal_pair_counts_by_direction[3]) +
-                    " anchor_prefilter=" +
+                    " conclusion_graph=" +
                     NormalTraceAnchorPrefilterSummary(m_normal_trace_evidence) +
                     " ann=" +
                    NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
@@ -3117,7 +3141,7 @@ void FastMatch::Learn(Image &image) {
                  " segments=" +
                  std::to_string(m_normal_trace_evidence.trace_segment_count) +
                  " reason=" + m_normal_trace_evidence.reason +
-                 " anchor_prefilter=" +
+                 " conclusion_graph=" +
                  NormalTraceAnchorPrefilterSummary(m_normal_trace_evidence) +
                  " ann=" +
                  NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
@@ -4294,6 +4318,22 @@ void FastMatch::setnormaltracedomain(int anchor_neighborhood_radius_px,
       std::clamp(xy_compression_bin_px, 1, 64);
   m_normal_trace_config.min_keypoints_per_domain =
       std::clamp(min_keypoints_per_domain, 2, 256);
+}
+
+void FastMatch::setnormaltracejunction(
+    int endpoint_spike_ratio_percent, int tangent_window_points,
+    int minimum_cross_angle_deg, int maximum_extrapolation_percent,
+    int join_spacing_multiplier_percent) {
+  m_normal_trace_config.endpoint_spike_ratio_percent =
+      std::clamp(endpoint_spike_ratio_percent, 110, 1000);
+  m_normal_trace_config.junction_tangent_window_points =
+      std::clamp(tangent_window_points, 2, 32);
+  m_normal_trace_config.junction_min_cross_angle_deg =
+      std::clamp(minimum_cross_angle_deg, 1, 89);
+  m_normal_trace_config.junction_max_extrapolation_percent =
+      std::clamp(maximum_extrapolation_percent, 25, 500);
+  m_normal_trace_config.junction_join_spacing_multiplier_percent =
+      std::clamp(join_spacing_multiplier_percent, 100, 2000);
 }
 
 void FastMatch::settransformsearchenabled(int enabled) {

@@ -1,7 +1,7 @@
 Image m_image;
 FastMatch m_match;
 
-// fastmatch_normal_trace_binding_version: 2
+// fastmatch_normal_trace_binding_version: 3
 // Version 2 follows the confirmed fixed-int Param_int_N dispatch order.
 
 m_image.copyFromMat(global_matInput);
@@ -253,6 +253,12 @@ m_match.setnormaltracedomain(
     global_fastmatch_normaltrace_min_keypoints_per_domain,
     global_fastmatch_normaltrace_xy_compression_bin_px,
     global_fastmatch_normaltrace_anchor_radius_px);
+m_match.setnormaltracejunction(
+    global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent,
+    global_fastmatch_normaltrace_junction_max_extrapolation_percent,
+    global_fastmatch_normaltrace_junction_min_cross_angle_deg,
+    global_fastmatch_normaltrace_junction_tangent_window_points,
+    global_fastmatch_normaltrace_endpoint_spike_ratio_percent);
 m_match.setcalibrationtestenabled(calibration_test_enabled);
 if (calibration_test_enabled == 1)
 {

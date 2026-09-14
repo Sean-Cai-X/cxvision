@@ -119,8 +119,12 @@ public:
         bool enabled = false;
         int domain_overlap_radius_px = 3;
         int normal_angle_tolerance_deg = 20;
+        // Legacy CxScript compatibility only. The conclusion graph performs
+        // no image-gradient extraction and does not consume this value.
         int min_gradient = 20;
         int dijkstra_max_nodes = 4096;
+        // Legacy CxScript compatibility only; ignored by pure conclusion-path
+        // Dijkstra.
         int dijkstra_gradient_cost_weight_permille = 700;
         int dijkstra_turn_cost_weight_permille = 200;
         int dijkstra_gap_cost_weight_permille = 100;
@@ -136,12 +140,20 @@ public:
         int ann_min_component_coverage_percent = 55;
         int trace_min_length_px = 20;
         int normal_pair_offset_px = 6;
+        // Legacy CxScript compatibility only. Final polarity always inherits
+        // the corresponding directional FindLine conclusion domain.
         int normal_polarity = 0;
         int corner_rejection_radius_px = 4;
         int tangent_sample_step_px = 2;
         int anchor_neighborhood_radius_px = 24;
         int xy_compression_bin_px = 4;
         int min_keypoints_per_domain = 4;
+        // Integer percentages keep CxScript controls and evidence deterministic.
+        int endpoint_spike_ratio_percent = 250;
+        int junction_tangent_window_points = 6;
+        int junction_min_cross_angle_deg = 12;
+        int junction_max_extrapolation_percent = 150;
+        int junction_join_spacing_multiplier_percent = 800;
     };
 
     struct NormalTraceEvidence
@@ -154,6 +166,10 @@ public:
         double closure_error_px = -1.0;
         double max_consecutive_gap_px = -1.0;
         double gradient_coverage = 0.0;
+        // Pure conclusion-graph semantics. gradient_coverage remains as a
+        // legacy projection field and mirrors selected_anchor_coverage.
+        double selected_anchor_coverage = 0.0;
+        int generated_conclusion_count = 0;
         int normal_pair_findline_bound_count = 0;
         int normal_pair_binding_miss_count = 0;
         int normal_pair_corner_rejected_count = 0;
@@ -178,15 +194,40 @@ public:
         std::array<int, 4> ann_component_counts{};
         std::array<int, 4> ann_selected_point_counts{};
         std::array<double, 4> ann_selected_coverage{};
+        std::array<double, 4> domain_join_allowed_gap_px{};
+        std::array<double, 4> domain_join_selected_gap_px{};
+        std::array<int, 4> endpoint_spike_pruned_counts{};
+        int endpoint_spike_ratio_percent = 0;
+        int junction_tangent_window_points = 0;
+        int junction_min_cross_angle_deg = 0;
+        int junction_max_extrapolation_percent = 0;
+        int junction_join_spacing_multiplier_percent = 0;
+        // Junction modes: 1 = constrained tangent intersection,
+        // 2 = constrained tangent blend fallback. Junctions are derived
+        // geometry and never become FindLine/Dijkstra conclusions.
+        std::array<int, 4> derived_junction_modes{};
+        std::array<double, 4> derived_junction_cross_angle_deg{};
+        std::array<double, 4> derived_junction_current_extrapolation_px{};
+        std::array<double, 4> derived_junction_next_extrapolation_px{};
+        std::vector<CxShapePoint> derived_junction_points;
         // Retained after domain overlap de-duplication; raw count is exposed
         // separately so the display stays bounded.
         std::vector<CxShapePoint> domain_points;
         std::array<std::vector<CxShapePoint>, 4> domain_points_by_direction;
         std::array<std::vector<CxShapePoint>, 4> compressed_points_by_direction;
         std::array<std::vector<CxShapePoint>, 4> ann_selected_points_by_direction;
+        // Dijkstra points are original selected FindLine conclusions. The
+        // derived trace is a render/model polyline produced by interpolation;
+        // it is never allowed to become new measurement evidence.
         std::vector<CxShapePoint> dijkstra_trace_points;
+        std::vector<int> dijkstra_source_directions;
+        std::vector<int> dijkstra_source_scans;
+        std::vector<CxShapePoint> derived_trace_points;
         std::vector<CxShapePoint> normal_pair_a;
         std::vector<CxShapePoint> normal_pair_b;
+        std::vector<CxShapePoint> normal_pair_source_points;
+        std::vector<int> normal_pair_source_directions;
+        std::vector<int> normal_pair_source_scans;
     };
 
     FastMatch();
@@ -257,6 +298,11 @@ public:
     void setnormaltracedomain(int anchor_neighborhood_radius_px,
                               int xy_compression_bin_px,
                               int min_keypoints_per_domain);
+    void setnormaltracejunction(int endpoint_spike_ratio_percent,
+                                int tangent_window_points,
+                                int minimum_cross_angle_deg,
+                                int maximum_extrapolation_percent,
+                                int join_spacing_multiplier_percent);
     const NormalTraceLearnConfig& getnormaltraceconfig() const
     { return m_normal_trace_config; }
     int getnormaltracecandidatecount() { return m_normal_trace_candidate_count; }

@@ -1544,6 +1544,22 @@ void ViewController::RefreshRuntimeObjectTable(
         normalTraceEvidence.max_consecutive_gap_px;
     object.fastmatch_normal_trace_gradient_coverage =
         normalTraceEvidence.gradient_coverage;
+    object.fastmatch_normal_trace_selected_anchor_coverage =
+        normalTraceEvidence.selected_anchor_coverage;
+    object.fastmatch_normal_trace_dijkstra_source_count =
+        static_cast<int>(normalTraceEvidence.dijkstra_trace_points.size());
+    object.fastmatch_normal_trace_derived_count =
+        static_cast<int>(normalTraceEvidence.derived_trace_points.size());
+    object.fastmatch_normal_trace_junction_intersection_count =
+        static_cast<int>(std::count(normalTraceEvidence.derived_junction_modes.begin(),
+                                    normalTraceEvidence.derived_junction_modes.end(), 1));
+    object.fastmatch_normal_trace_junction_blend_count =
+        static_cast<int>(std::count(normalTraceEvidence.derived_junction_modes.begin(),
+                                    normalTraceEvidence.derived_junction_modes.end(), 2));
+    object.fastmatch_normal_trace_endpoint_spike_pruned_counts =
+        normalTraceEvidence.endpoint_spike_pruned_counts;
+    object.fastmatch_normal_trace_generated_conclusion_count =
+        normalTraceEvidence.generated_conclusion_count;
     object.fastmatch_normal_trace_findline_bound_pairs =
         normalTraceEvidence.normal_pair_findline_bound_count;
     object.fastmatch_normal_trace_binding_misses =

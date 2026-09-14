@@ -5580,9 +5580,9 @@ void ViewController::drawScriptAcceptancePanels() {
          m_manualTest.show_fastmatch_normal_trace_ann_component ||
          m_manualTest.show_fastmatch_normal_trace_path ||
          m_manualTest.show_fastmatch_normal_trace_pairs)) {
-      // Normal-trace diagnostics are a read-only evidence layer: retained
-      // domain -> Dijkstra path -> local-normal A/B samples. They never
-      // create ShapeElements or write into the source test image.
+      // Normal-trace diagnostics are read-only: original FindLine conclusions
+      // -> value-preserving compression -> Dijkstra source references ->
+      // derived polyline -> domain-polarity A/B. Nothing is written to input.
       const FastMatch::NormalTraceEvidence& evidence =
           fastMatchTool->getnormaltraceevidence();
       auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
@@ -5594,27 +5594,18 @@ void ViewController::drawScriptAcceptancePanels() {
             fastMatchTool->getlearnmodeloriginx(),
             fastMatchTool->getlearnmodeloriginy() - 24.0);
         const std::string prefilterText =
-            "Anchor prefilter band=" +
-            std::to_string(static_cast<int>(
-                std::lround(evidence.anchor_normal_band_px))) +
-            "px accepted=" +
+            "Conclusion graph valid=" +
             std::to_string(evidence.anchor_prefilter_accepted_counts[0]) + "," +
             std::to_string(evidence.anchor_prefilter_accepted_counts[3]) + "," +
             std::to_string(evidence.anchor_prefilter_accepted_counts[1]) + "," +
             std::to_string(evidence.anchor_prefilter_accepted_counts[2]) +
-            " reject(B/S/N)=" +
-            std::to_string(evidence.anchor_band_rejected_counts[0] +
-                           evidence.anchor_band_rejected_counts[1] +
-                           evidence.anchor_band_rejected_counts[2] +
-                           evidence.anchor_band_rejected_counts[3]) + "/" +
-            std::to_string(evidence.anchor_slope_rejected_counts[0] +
-                           evidence.anchor_slope_rejected_counts[1] +
-                           evidence.anchor_slope_rejected_counts[2] +
-                           evidence.anchor_slope_rejected_counts[3]) + "/" +
-            std::to_string(evidence.anchor_normal_rejected_counts[0] +
-                           evidence.anchor_normal_rejected_counts[1] +
-                           evidence.anchor_normal_rejected_counts[2] +
-                           evidence.anchor_normal_rejected_counts[3]);
+            " compressed=" +
+            std::to_string(evidence.compressed_keypoint_counts[0]) + "," +
+            std::to_string(evidence.compressed_keypoint_counts[3]) + "," +
+            std::to_string(evidence.compressed_keypoint_counts[1]) + "," +
+            std::to_string(evidence.compressed_keypoint_counts[2]) +
+            " generated conclusions=" +
+            std::to_string(evidence.generated_conclusion_count);
         drawList->AddText(evidenceLabel, IM_COL32(255, 220, 110, 255),
                           prefilterText.c_str());
       }
@@ -5658,16 +5649,28 @@ void ViewController::drawScriptAcceptancePanels() {
         }
       }
       if (m_manualTest.show_fastmatch_normal_trace_path &&
-          evidence.dijkstra_trace_points.size() >= 2) {
-        ImVec2 previous = ImageToScreenD(evidence.dijkstra_trace_points.front().x,
-                                         evidence.dijkstra_trace_points.front().y);
-        for (std::size_t i = 1; i < evidence.dijkstra_trace_points.size(); ++i) {
-          const CxShapePoint& point = evidence.dijkstra_trace_points[i];
+          evidence.derived_trace_points.size() >= 2) {
+        ImVec2 previous = ImageToScreenD(evidence.derived_trace_points.front().x,
+                                         evidence.derived_trace_points.front().y);
+        for (std::size_t i = 1; i < evidence.derived_trace_points.size(); ++i) {
+          const CxShapePoint& point = evidence.derived_trace_points[i];
           const ImVec2 current = ImageToScreenD(point.x, point.y);
           drawList->AddLine(previous, current, IM_COL32(8, 18, 24, 225), 3.2f);
           drawList->AddLine(previous, current, IM_COL32(40, 225, 255, 255),
                             1.25f);
           previous = current;
+        }
+        for (const CxShapePoint &point : evidence.dijkstra_trace_points) {
+          const ImVec2 source = ImageToScreenD(point.x, point.y);
+          drawList->AddCircleFilled(source, 2.4f,
+                                    IM_COL32(255, 230, 95, 255), 8);
+        }
+        for (const CxShapePoint &point : evidence.derived_junction_points) {
+          const ImVec2 junction = ImageToScreenD(point.x, point.y);
+          drawList->AddCircleFilled(junction, 4.8f,
+                                    IM_COL32(255, 155, 45, 255), 10);
+          drawList->AddCircle(junction, 5.6f, IM_COL32(20, 24, 28, 255),
+                              10, 1.2f);
         }
       }
       if (m_manualTest.show_fastmatch_normal_trace_pairs) {
@@ -5701,12 +5704,16 @@ void ViewController::drawScriptAcceptancePanels() {
           evidence.reason == "NORMAL_TRACE_DISABLED" ||
                   evidence.reason == "NOT_RUN"
               ? "Normal trace NOT_RUN: enable Normal-Trace Learn, then click Learn"
-               : "Normal trace: domain=" +
-                    std::to_string(evidence.domain_points.size()) +
+               : "Normal trace: conclusions=" +
+                     std::to_string(evidence.domain_points.size()) +
                     " ANN=" + std::to_string(annSelected) + "/" +
                     std::to_string(annComponents) + " path=" +
-                    std::to_string(evidence.dijkstra_trace_points.size()) +
-                    " pairs=" + std::to_string(evidence.normal_pair_a.size()) +
+                     std::to_string(evidence.dijkstra_trace_points.size()) +
+                     " derived=" +
+                     std::to_string(evidence.derived_trace_points.size()) +
+                     " junctions=" +
+                     std::to_string(evidence.derived_junction_points.size()) +
+                     " pairs=" + std::to_string(evidence.normal_pair_a.size()) +
                     " segments=" +
                     std::to_string(evidence.trace_segment_count) + "/4 closed=" +
                     std::string(evidence.closure_error_px >= 0.0 &&
@@ -5715,13 +5722,13 @@ void ViewController::drawScriptAcceptancePanels() {
                                     : "no") +
                     " coverage=" +
                     std::to_string(static_cast<int>(std::lround(
-                        evidence.gradient_coverage * 100.0))) +
+                         evidence.selected_anchor_coverage * 100.0))) +
                     "% " + evidence.reason;
       label = "Learn rev=" +
               std::to_string(m_manualTest.fastmatch_last_requested_revision) +
               " | " + label;
       if (m_manualTest.show_fastmatch_normal_trace_path &&
-          evidence.dijkstra_trace_points.size() < 2) {
+          evidence.derived_trace_points.size() < 2) {
         label += " | selected Dijkstra=UNAVAILABLE";
       }
       if (m_manualTest.show_fastmatch_normal_trace_pairs &&

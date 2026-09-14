@@ -2065,3 +2065,160 @@ FM模型演化方向提示:
   - Shape/ROI 控件
 
   其中白色 K0/K1... 圆点和连线是 Shape/ROI 交互层；青色细线才是 Dijkstra Trace，绿色/品红点才是 A/B 结果。
+  
+  
+  。Normal-Trace 已按你的定义收口为：
+
+  FindLine 结论点 → 邻域去重/XY 压缩 → ANN 联通 → Dijkstra 轨迹去重 → 源结论路径法线 → 继承 FindLine 极性的 A/B
+
+  关键变化：
+
+  - 移除 Normal-Trace 内部的 Sobel/图像二次取点。
+  - Dijkstra 只选择原始 FindLine 结论点，不生成检测点。
+  - 跨桶跳跃增加代价，优先保留连续结论点。
+  - 四方向连接范围根据真实采样间距和轨迹跨度自适应。
+  - A/B 极性由每方向 FindLine 的扫描方向与 method 继承，不再根据局部明暗翻转。
+  - 派生细线与原始结论点在数据和显示上严格分开。
+  - 原测试图片 SHA-256 前后完全一致，未被修改。
+
+  验证结果：
+
+  - COMPILE_PASS
+  - 最新二进制：2026-09-14 18:56:57
+  - Evidence Case：FindLine Domain Polarity Path
+  - NORMAL_TRACE_COMPLETE
+  - FindLine 候选点：120
+  - Dijkstra 保留源点：78
+  - direction/scan 来源索引：78/78，完整对应
+  - 派生闭合细线：776 点
+  - A/B pairs：33
+  - Dijkstra 新生成结论点：0
+  - 源结论覆盖率：83.33%
+  - Learn model points：33
+  - Headless 耗时约：147 ms
+
+  人工分析资产：
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_192000_findline_domain_polarity_path/FindLine Domain Polarity Path/
+    evidence_overlay.png
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_192000_findline_domain_polarity_path/FindLine Domain Polarity Path/
+    line_trace.json
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_192000_findline_domain_polarity_path/FindLine Domain Polarity Path/
+    result_summary.json
+
+  Overlay 颜色：
+
+  - 黄色：原始 FindLine/Dijkstra 源结论点
+  - 青色：派生连续细线
+  - 红色：A
+  - 绿色：B
+
+  主要实现位置：
+
+  - cximage/FastMatch.cpp:121
+  - cximage/ManualConsoleParamRegressionPanel.cpp:3839
+  - cximage/ViewController.cpp:5652
+  - cximage/CxScriptHeadlessRunner.cpp:3102
+
+  Min Gradient、Gradient Cost、独立 Normal Polarity 现为兼容字段，不参与该路径并在界面隐藏。有效调节项保留为邻域半径、XY 压缩、ANN 半径/KNN、切向与法向容
+  差、Dijkstra 预算/间隙/转向代价、Pair Offset、Corner Rejection 和源点采样步长。
+
+  当前完成的是 Headless Learn 验证；最新 GUI 显示效果仍需人工打开该英文案例完成 T8 复核。
+  
+  交界斜切问题已解决，并把后续调优能力一并补齐。
+
+  ### 问题本质
+
+  原来不是 Dijkstra 主路径整体错误，而是：
+
+  1. 某方向 FindLine 扫描越过真实角点后，命中相邻边，留下孤立端点。
+  2. Dijkstra 保留了这个“越角点”。
+  3. 四段闭合时直接连接相邻端点，形成穿过对象内部的青色斜线。
+  4. 交界处缺少独立的几何重建与约束证据。
+
+  ### 已完成的处理
+
+  现在交界流程变为：
+
+  FindLine 原结论点
+  → ANN 聚类与 Dijkstra 选轨
+  → 自适应端点孤立跳变清理
+  → 四段全局有序连接
+  → 端部多点切向估计
+  → 有效交点：
+       尖角模式：切线交点
+       平滑模式：交点约束二次曲线
+  → 无效/近平行交点：
+       受限三次切向过渡
+  → 原结论点法向与 FindLine 极性 A/B
+
+  关键原则没有改变：
+
+  - Dijkstra 不产生新检测点。
+  - 交界点和青色连续线只是派生几何。
+  - A/B 只绑定原始 FindLine 结论点。
+  - 不使用 Sobel 重新提取点或决定极性。
+  - 原测试图片不被写入或修改。
+
+  核心实现见 /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/FastMatch.cpp:743。
+
+  ### Key Parameter Controls
+
+  交界参数不再是隐藏常量，已加入 Derived Junction Reconstruction：
+
+   控件                                    默认值    作用
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   endpoint spike ratio % of median gap       250    超过局部中位点距 2.5 倍时视为端点孤立跳变
+  ──────────────────────────────────────  ────────  ───────────────────────────────────────────
+   junction tangent source points               6    估算交界切向使用的端部源点数
+  ──────────────────────────────────────  ────────  ───────────────────────────────────────────
+   junction minimum cross angle deg            12    小于该交角时不输出尖锐交点
+  ──────────────────────────────────────  ────────  ───────────────────────────────────────────
+   junction maximum extrapolation %           150    限制切线交点最大外推距离
+  ──────────────────────────────────────  ────────  ───────────────────────────────────────────
+   junction join spacing multiplier %         800    按真实采样间距计算跨方向连接范围
+
+  界面实现见 /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxvision_repo/cximage/ManualConsoleParamRegressionPanel.cpp:3821，CxScript 接口见 /D:/Codex-WorkDir/
+  Sean_WorkDir/cxvisionai/cxvision_repo/cxparser/cxscript/module/cximage/fastmatch_direct_test.cxsc:256。
+
+  ### 验证结论
+
+  COMPILE_PASS
+
+  - 二进制：/D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/build01/Release/cxvision_imgui_acceptance.exe
+  - 修改时间：2026-09-14 19:33:09
+  - 原图 SHA-256 前后均为：82CE108B7D412E53E87AD9C5D7662147E1E327449646CA4A994542B22CDAD8D5
+
+  两个英文 Evidence Case 均完成 Headless 验证：
+
+  1. Directional Junction Parameter Controls
+      - NORMAL_TRACE_COMPLETE
+      - 四方向端点清理：1,1,1,1
+      - 交界模式：1,1,1,1，全部为切线交点
+      - A/B：47 组
+      - 新生成结论点：0
+      - closure error：0
+      - 最大连续步长：1.41421
+
+     /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_211000_directional_junction_parameter_controls/Directional Junction
+     Parameter Controls/evidence_overlay.png
+     /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_211000_directional_junction_parameter_controls/Directional Junction
+     Parameter Controls/line_trace.json
+
+  2. Directional Junction Tangent Blend Fallback
+      - 将最小交角调到 89°
+      - 交界模式变为 2,2,2,1
+      - 证明参数确实改变算法路径
+      - 平滑交界仍为 NORMAL_TRACE_COMPLETE
+      - A/B：47 组
+      - 新生成结论点：0
+      - closure error：0
+
+     /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_211100_directional_junction_tangent_blend_fallback/Directional Junction
+     Tangent Blend Fallback/evidence_overlay.png
+     /D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260914_211100_directional_junction_tangent_blend_fallback/Directional Junction
+     Tangent Blend Fallback/line_trace.json
+
+  本轮已经收口当前四方向交界的斜切、越角孤立点和平滑 fallback 闭合问题。

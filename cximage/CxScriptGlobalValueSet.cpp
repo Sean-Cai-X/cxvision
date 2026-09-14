@@ -271,6 +271,11 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_fastmatch_normaltrace_anchor_radius_px"] = 24.0;
     overrides["global_fastmatch_normaltrace_xy_compression_bin_px"] = 4.0;
     overrides["global_fastmatch_normaltrace_min_keypoints_per_domain"] = 4.0;
+    overrides["global_fastmatch_normaltrace_endpoint_spike_ratio_percent"] = 250.0;
+    overrides["global_fastmatch_normaltrace_junction_tangent_window_points"] = 6.0;
+    overrides["global_fastmatch_normaltrace_junction_min_cross_angle_deg"] = 12.0;
+    overrides["global_fastmatch_normaltrace_junction_max_extrapolation_percent"] = 150.0;
+    overrides["global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent"] = 800.0;
 
     overrides["global_ocr_threshold"] = 110.0;
     overrides["global_ocr_foreground_mode"] = 1.0;

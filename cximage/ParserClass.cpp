@@ -1736,6 +1736,9 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "setnormaltracedomain", &FastMatch::setnormaltracedomain);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setnormaltracejunction",
+                            &FastMatch::setnormaltracejunction);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformcenter", &FastMatch::settransformcenter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformextent", &FastMatch::settransformextent);
