@@ -158,6 +158,12 @@ struct CxFastMatchNormalTraceEvidence
     int normal_pair_corner_rejected_count = 0;
     int loop_erased_point_count = 0;
     std::array<int, 4> normal_pair_counts_by_direction{};
+    double anchor_normal_band_px = 0.0;
+    std::array<int, 4> anchor_near_candidate_counts{};
+    std::array<int, 4> anchor_band_rejected_counts{};
+    std::array<int, 4> anchor_slope_rejected_counts{};
+    std::array<int, 4> anchor_normal_rejected_counts{};
+    std::array<int, 4> anchor_prefilter_accepted_counts{};
     std::array<int, 4> domain_deduplicated_counts{};
     std::array<int, 4> compressed_keypoint_counts{};
     std::array<int, 4> ann_edge_counts{};

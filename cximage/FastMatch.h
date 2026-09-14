@@ -159,6 +159,16 @@ public:
         int normal_pair_corner_rejected_count = 0;
         int loop_erased_point_count = 0;
         std::array<int, 4> normal_pair_counts_by_direction{};
+        // Candidates must first bind to the nearest selected FindLine
+        // conclusion and pass its local slope/scan-normal constraints. ANN and
+        // Dijkstra only consume the accepted set; these counts make that
+        // ordering auditable in manual Evidence review.
+        double anchor_normal_band_px = 0.0;
+        std::array<int, 4> anchor_near_candidate_counts{};
+        std::array<int, 4> anchor_band_rejected_counts{};
+        std::array<int, 4> anchor_slope_rejected_counts{};
+        std::array<int, 4> anchor_normal_rejected_counts{};
+        std::array<int, 4> anchor_prefilter_accepted_counts{};
         std::array<int, 4> domain_deduplicated_counts{};
         std::array<int, 4> compressed_keypoint_counts{};
         // ANN is the neighbourhood re-clustering stage.  These facts prove

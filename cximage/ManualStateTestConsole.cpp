@@ -1554,6 +1554,18 @@ void ViewController::RefreshRuntimeObjectTable(
         normalTraceEvidence.loop_erased_point_count;
     object.fastmatch_normal_trace_pair_direction_counts =
         normalTraceEvidence.normal_pair_counts_by_direction;
+    object.fastmatch_normal_trace_anchor_normal_band_px =
+        normalTraceEvidence.anchor_normal_band_px;
+    object.fastmatch_normal_trace_anchor_near_counts =
+        normalTraceEvidence.anchor_near_candidate_counts;
+    object.fastmatch_normal_trace_anchor_band_rejected_counts =
+        normalTraceEvidence.anchor_band_rejected_counts;
+    object.fastmatch_normal_trace_anchor_slope_rejected_counts =
+        normalTraceEvidence.anchor_slope_rejected_counts;
+    object.fastmatch_normal_trace_anchor_normal_rejected_counts =
+        normalTraceEvidence.anchor_normal_rejected_counts;
+    object.fastmatch_normal_trace_anchor_accepted_counts =
+        normalTraceEvidence.anchor_prefilter_accepted_counts;
     object.fastmatch_normal_trace_domain_counts =
         normalTraceEvidence.domain_deduplicated_counts;
     object.fastmatch_normal_trace_keypoint_counts =

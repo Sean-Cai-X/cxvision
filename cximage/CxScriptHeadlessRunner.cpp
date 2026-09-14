@@ -3215,6 +3215,18 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << ",\n";
         write_int4("normal_pair_counts_by_direction",
             capture.fastmatch_normal_trace.normal_pair_counts_by_direction);
+        line_trace_file << "  \"anchor_normal_band_px\": "
+            << capture.fastmatch_normal_trace.anchor_normal_band_px << ",\n";
+        write_int4("anchor_near_candidate_counts",
+            capture.fastmatch_normal_trace.anchor_near_candidate_counts);
+        write_int4("anchor_band_rejected_counts",
+            capture.fastmatch_normal_trace.anchor_band_rejected_counts);
+        write_int4("anchor_slope_rejected_counts",
+            capture.fastmatch_normal_trace.anchor_slope_rejected_counts);
+        write_int4("anchor_normal_rejected_counts",
+            capture.fastmatch_normal_trace.anchor_normal_rejected_counts);
+        write_int4("anchor_prefilter_accepted_counts",
+            capture.fastmatch_normal_trace.anchor_prefilter_accepted_counts);
         write_int4("domain_deduplicated_counts",
             capture.fastmatch_normal_trace.domain_deduplicated_counts);
         write_int4("compressed_keypoint_counts",
@@ -3369,6 +3381,8 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << capture.fastmatch_normal_trace.normal_pair_corner_rejected_count
             << ",\"loop_erased_point_count\":"
             << capture.fastmatch_normal_trace.loop_erased_point_count
+            << ",\"anchor_normal_band_px\":"
+            << capture.fastmatch_normal_trace.anchor_normal_band_px
             << "},\n";
         object_state_file << "  \"fastmatch_model_width\": " << capture.fastmatch_model_width << ",\n";
         object_state_file << "  \"fastmatch_model_height\": " << capture.fastmatch_model_height << ",\n";

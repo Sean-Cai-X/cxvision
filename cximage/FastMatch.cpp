@@ -48,6 +48,26 @@ std::string NormalTraceAnnEvidenceSummary(
   return summary;
 }
 
+std::string NormalTraceAnchorPrefilterSummary(
+    const FastMatch::NormalTraceEvidence &evidence) {
+  static const char *names[4] = {"top", "bottom", "left", "right"};
+  std::string summary = "band_px=" +
+      std::to_string(evidence.anchor_normal_band_px);
+  for (int direction = 0; direction < 4; ++direction) {
+    summary += " " + std::string(names[direction]) + "={near=" +
+        std::to_string(evidence.anchor_near_candidate_counts[direction]) +
+        ",accepted=" +
+        std::to_string(evidence.anchor_prefilter_accepted_counts[direction]) +
+        ",reject_band=" +
+        std::to_string(evidence.anchor_band_rejected_counts[direction]) +
+        ",reject_slope=" +
+        std::to_string(evidence.anchor_slope_rejected_counts[direction]) +
+        ",reject_normal=" +
+        std::to_string(evidence.anchor_normal_rejected_counts[direction]) + "}";
+  }
+  return summary;
+}
+
 std::vector<NormalTraceCandidate> BuildNormalTraceDomain(
     const cv::Mat& gray, const cv::Rect& roi, int minGradient,
     int overlapRadius, int& rawCount) {
@@ -82,6 +102,17 @@ struct NormalTraceKeyPoint {
   float u = 0.0f;
   float v = 0.0f;
   float anchor_distance = 0.0f;
+  float anchor_normal_distance = 0.0f;
+  float anchor_slope_alignment = 0.0f;
+  float anchor_normal_alignment = 0.0f;
+};
+
+struct NormalTraceAnchorFrame {
+  cv::Point2f point;
+  cv::Point2f tangent;
+  cv::Point2f scan_normal;
+  bool tangent_valid = false;
+  bool scan_normal_valid = false;
 };
 
 struct NormalTraceAnnPointCloud {
@@ -106,9 +137,9 @@ cv::Point2f NormalTraceLocalPoint(const cv::Point &point, double centerX,
                      static_cast<float>(-sinAngle * dx + cosAngle * dy));
 }
 
-std::array<std::vector<cv::Point2f>, 4> CollectNormalTraceAnchors(
+std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
     const FastMatch &source, int &availableSides) {
-  std::array<std::vector<cv::Point2f>, 4> anchors;
+  std::array<std::vector<NormalTraceAnchorFrame>, 4> anchors;
   availableSides = 0;
   for (int direction = 0; direction < 4; ++direction) {
     const FastMatch::DirectionalProbeEvidence &side =
@@ -119,13 +150,70 @@ std::array<std::vector<cv::Point2f>, 4> CollectNormalTraceAnchors(
       if (side.selected_point_valid_by_scan[i] == 0)
         continue;
       const CxShapePoint &point = side.selected_point_by_scan[i];
-      anchors[direction].emplace_back(static_cast<float>(point.x),
-                                      static_cast<float>(point.y));
+      NormalTraceAnchorFrame frame;
+      frame.point = cv::Point2f(static_cast<float>(point.x),
+                                static_cast<float>(point.y));
+      if (i < side.scan_lines.size()) {
+        const FastMatch::DirectionalProbeScanLine &line = side.scan_lines[i];
+        frame.scan_normal = cv::Point2f(
+            static_cast<float>(line.p1.x - line.p0.x),
+            static_cast<float>(line.p1.y - line.p0.y));
+        const float length = std::sqrt(frame.scan_normal.dot(frame.scan_normal));
+        if (length > 1e-6f) {
+          frame.scan_normal *= 1.0f / length;
+          frame.scan_normal_valid = true;
+        }
+      }
+      anchors[direction].push_back(frame);
     }
     if (anchors[direction].empty()) {
-      for (const CxShapePoint &point : side.accepted_points)
-        anchors[direction].emplace_back(static_cast<float>(point.x),
-                                        static_cast<float>(point.y));
+      for (const CxShapePoint &point : side.accepted_points) {
+        NormalTraceAnchorFrame frame;
+        frame.point = cv::Point2f(static_cast<float>(point.x),
+                                  static_cast<float>(point.y));
+        anchors[direction].push_back(frame);
+      }
+    }
+
+    // The local boundary slope is estimated from adjacent selected FindLine
+    // conclusions, never from the unclassified Sobel cloud. Endpoints use a
+    // one-sided estimate; interior anchors use the wider previous-to-next
+    // chord, which is less sensitive to one noisy Gauge Line conclusion.
+    for (std::size_t i = 0; i < anchors[direction].size(); ++i) {
+      int previous = static_cast<int>(i) - 1;
+      while (previous >= 0 &&
+             cv::norm(anchors[direction][i].point -
+                      anchors[direction][static_cast<std::size_t>(previous)].point) < 0.5f)
+        --previous;
+      std::size_t next = i + 1;
+      while (next < anchors[direction].size() &&
+             cv::norm(anchors[direction][next].point -
+                      anchors[direction][i].point) < 0.5f)
+        ++next;
+      cv::Point2f tangent;
+      if (previous >= 0 && next < anchors[direction].size())
+        tangent = anchors[direction][next].point -
+                  anchors[direction][static_cast<std::size_t>(previous)].point;
+      else if (next < anchors[direction].size())
+        tangent = anchors[direction][next].point - anchors[direction][i].point;
+      else if (previous >= 0)
+        tangent = anchors[direction][i].point -
+                  anchors[direction][static_cast<std::size_t>(previous)].point;
+      const float tangentLength = std::sqrt(tangent.dot(tangent));
+      if (tangentLength > 1e-6f) {
+        anchors[direction][i].tangent = tangent * (1.0f / tangentLength);
+        anchors[direction][i].tangent_valid = true;
+      }
+      // Fallback anchors do not have a retained Gauge Line. Their normal is
+      // still derived from the local conclusion slope, not from candidate
+      // pixels, so the pre-Dijkstra ordering remains deterministic.
+      if (!anchors[direction][i].scan_normal_valid &&
+          anchors[direction][i].tangent_valid) {
+        const cv::Point2f &localTangent = anchors[direction][i].tangent;
+        anchors[direction][i].scan_normal =
+            cv::Point2f(-localTangent.y, localTangent.x);
+        anchors[direction][i].scan_normal_valid = true;
+      }
     }
     if (!anchors[direction].empty())
       ++availableSides;
@@ -187,93 +275,155 @@ bool ResolveNormalTraceFindLineNormal(
 
 bool BuildCompressedNormalTraceDomains(
     const std::vector<NormalTraceCandidate> &raw,
-    const std::array<std::vector<cv::Point2f>, 4> &anchors,
+    const std::array<std::vector<NormalTraceAnchorFrame>, 4> &anchors,
     double centerX, double centerY, double cosAngle, double sinAngle,
     const FastMatch::NormalTraceLearnConfig &cfg,
     std::array<std::vector<NormalTraceKeyPoint>, 4> &keypoints,
     FastMatch::NormalTraceEvidence &evidence) {
-  std::array<std::vector<NormalTraceCandidate>, 4> classified;
+  std::array<std::vector<NormalTraceKeyPoint>, 4> classified;
   const float anchorRadius =
       static_cast<float>(std::max(4, cfg.anchor_neighborhood_radius_px));
+  // The neighbourhood radius controls tangential reach between Gauge Line
+  // conclusions. The much narrower normal band controls which physical edge
+  // is eligible. It is derived from already exposed controls, so old scripts
+  // remain compatible while the effective value stays visible in Evidence.
+  const float anchorNormalBand = std::max(
+      2.0f, std::min(anchorRadius,
+                     static_cast<float>(std::max(
+                         cfg.normal_pair_offset_px,
+                         cfg.xy_compression_bin_px * 2))));
+  evidence.anchor_normal_band_px = anchorNormalBand;
+  const float requiredSlopeAlignment = std::cos(
+      static_cast<float>(std::clamp(cfg.ann_tangent_deviation_deg, 1, 89)) *
+      static_cast<float>(CV_PI / 180.0));
+  const float requiredNormalAlignment = std::cos(
+      static_cast<float>(std::clamp(cfg.ann_normal_deviation_deg, 1, 89)) *
+      static_cast<float>(CV_PI / 180.0));
   for (const NormalTraceCandidate &candidate : raw) {
     int selectedDirection = -1;
+    const NormalTraceAnchorFrame *selectedAnchor = nullptr;
     float bestDistance = std::numeric_limits<float>::infinity();
     for (int direction = 0; direction < 4; ++direction) {
-      for (const cv::Point2f &anchor : anchors[direction]) {
+      for (const NormalTraceAnchorFrame &anchor : anchors[direction]) {
         const float distance = cv::norm(cv::Point2f(
-            static_cast<float>(candidate.point.x) - anchor.x,
-            static_cast<float>(candidate.point.y) - anchor.y));
+            static_cast<float>(candidate.point.x) - anchor.point.x,
+            static_cast<float>(candidate.point.y) - anchor.point.y));
         if (distance < bestDistance) {
           bestDistance = distance;
           selectedDirection = direction;
+          selectedAnchor = &anchor;
         }
       }
     }
-    if (selectedDirection >= 0 && bestDistance <= anchorRadius)
-      classified[selectedDirection].push_back(candidate);
+    if (selectedDirection < 0 || selectedAnchor == nullptr ||
+        bestDistance > anchorRadius)
+      continue;
+
+    ++evidence.anchor_near_candidate_counts[selectedDirection];
+    const cv::Point2f delta(
+        static_cast<float>(candidate.point.x) - selectedAnchor->point.x,
+        static_cast<float>(candidate.point.y) - selectedAnchor->point.y);
+    const float normalDistance = selectedAnchor->scan_normal_valid
+        ? std::abs(delta.dot(selectedAnchor->scan_normal))
+        : bestDistance;
+    const cv::Point2f candidateTangent(-candidate.normal.y,
+                                       candidate.normal.x);
+    const float slopeAlignment = selectedAnchor->tangent_valid
+        ? std::abs(candidateTangent.dot(selectedAnchor->tangent))
+        : 0.0f;
+    const float normalAlignment = selectedAnchor->scan_normal_valid
+        ? std::abs(candidate.normal.dot(selectedAnchor->scan_normal))
+        : 0.0f;
+    const bool bandAccepted = normalDistance <= anchorNormalBand;
+    const bool slopeAccepted = selectedAnchor->tangent_valid &&
+                               slopeAlignment >= requiredSlopeAlignment;
+    const bool normalAccepted = selectedAnchor->scan_normal_valid &&
+                                normalAlignment >= requiredNormalAlignment;
+    if (!bandAccepted)
+      ++evidence.anchor_band_rejected_counts[selectedDirection];
+    if (!slopeAccepted)
+      ++evidence.anchor_slope_rejected_counts[selectedDirection];
+    if (!normalAccepted)
+      ++evidence.anchor_normal_rejected_counts[selectedDirection];
+    if (!bandAccepted || !slopeAccepted || !normalAccepted)
+      continue;
+
+    NormalTraceKeyPoint key;
+    key.candidate = candidate;
+    key.direction = selectedDirection;
+    key.anchor_distance = bestDistance;
+    key.anchor_normal_distance = normalDistance;
+    key.anchor_slope_alignment = slopeAlignment;
+    key.anchor_normal_alignment = normalAlignment;
+    classified[selectedDirection].push_back(key);
+    ++evidence.anchor_prefilter_accepted_counts[selectedDirection];
   }
 
   const int overlapRadius2 =
       std::max(0, cfg.domain_overlap_radius_px * cfg.domain_overlap_radius_px);
   const int binSize = std::max(1, cfg.xy_compression_bin_px);
   for (int direction = 0; direction < 4; ++direction) {
-    std::vector<NormalTraceCandidate> &items = classified[direction];
+    std::vector<NormalTraceKeyPoint> &items = classified[direction];
     std::sort(items.begin(), items.end(),
-              [](const NormalTraceCandidate &a, const NormalTraceCandidate &b) {
-                return a.gradient > b.gradient;
+              [](const NormalTraceKeyPoint &a, const NormalTraceKeyPoint &b) {
+                if (a.anchor_normal_distance != b.anchor_normal_distance)
+                  return a.anchor_normal_distance < b.anchor_normal_distance;
+                const float aAlignment =
+                    std::min(a.anchor_slope_alignment, a.anchor_normal_alignment);
+                const float bAlignment =
+                    std::min(b.anchor_slope_alignment, b.anchor_normal_alignment);
+                if (aAlignment != bAlignment)
+                  return aAlignment > bAlignment;
+                return a.candidate.gradient > b.candidate.gradient;
               });
-    std::vector<NormalTraceCandidate> retained;
-    for (const NormalTraceCandidate &candidate : items) {
+    std::vector<NormalTraceKeyPoint> retained;
+    for (const NormalTraceKeyPoint &key : items) {
       bool overlap = false;
-      for (const NormalTraceCandidate &kept : retained) {
-        const int dx = candidate.point.x - kept.point.x;
-        const int dy = candidate.point.y - kept.point.y;
+      for (const NormalTraceKeyPoint &kept : retained) {
+        const int dx = key.candidate.point.x - kept.candidate.point.x;
+        const int dy = key.candidate.point.y - kept.candidate.point.y;
         if (dx * dx + dy * dy <= overlapRadius2) {
           overlap = true;
           break;
         }
       }
       if (!overlap)
-        retained.push_back(candidate);
+        retained.push_back(key);
     }
     evidence.domain_deduplicated_counts[direction] =
         static_cast<int>(retained.size());
-    for (const NormalTraceCandidate &candidate : retained) {
+    for (const NormalTraceKeyPoint &key : retained) {
       evidence.domain_points.push_back(
-          {static_cast<double>(candidate.point.x),
-           static_cast<double>(candidate.point.y)});
+          {static_cast<double>(key.candidate.point.x),
+           static_cast<double>(key.candidate.point.y)});
       evidence.domain_points_by_direction[direction].push_back(
-          {static_cast<double>(candidate.point.x),
-           static_cast<double>(candidate.point.y)});
+          {static_cast<double>(key.candidate.point.x),
+           static_cast<double>(key.candidate.point.y)});
     }
 
     std::map<int, std::vector<NormalTraceKeyPoint>> buckets;
-    for (const NormalTraceCandidate &candidate : retained) {
+    for (NormalTraceKeyPoint key : retained) {
       const cv::Point2f local = NormalTraceLocalPoint(
-          candidate.point, centerX, centerY, cosAngle, sinAngle);
+          key.candidate.point, centerX, centerY, cosAngle, sinAngle);
       const float tangent = direction < 2 ? local.x : local.y;
-      float nearestAnchor = std::numeric_limits<float>::infinity();
-      for (const cv::Point2f &anchor : anchors[direction])
-        nearestAnchor = std::min(
-            nearestAnchor,
-            static_cast<float>(cv::norm(cv::Point2f(
-                static_cast<float>(candidate.point.x) - anchor.x,
-                static_cast<float>(candidate.point.y) - anchor.y))));
-      NormalTraceKeyPoint key;
-      key.candidate = candidate;
       key.direction = direction;
       key.bin = static_cast<int>(std::floor(tangent / binSize));
       key.u = local.x;
       key.v = local.y;
-      key.anchor_distance = nearestAnchor;
       buckets[key.bin].push_back(key);
     }
     for (auto &entry : buckets) {
       std::vector<NormalTraceKeyPoint> &bucket = entry.second;
       std::sort(bucket.begin(), bucket.end(),
                 [](const NormalTraceKeyPoint &a, const NormalTraceKeyPoint &b) {
-                  if (a.anchor_distance != b.anchor_distance)
-                    return a.anchor_distance < b.anchor_distance;
+                  if (a.anchor_normal_distance != b.anchor_normal_distance)
+                    return a.anchor_normal_distance < b.anchor_normal_distance;
+                  const float aAlignment =
+                      std::min(a.anchor_slope_alignment, a.anchor_normal_alignment);
+                  const float bAlignment =
+                      std::min(b.anchor_slope_alignment, b.anchor_normal_alignment);
+                  if (aAlignment != bAlignment)
+                    return aAlignment > bAlignment;
                   return a.candidate.gradient > b.candidate.gradient;
                 });
       const std::size_t retainCount = std::min<std::size_t>(3, bucket.size());
@@ -786,8 +936,8 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   const double centerX = roi.x + roi.width * 0.5;
   const double centerY = roi.y + roi.height * 0.5;
   int availableSides = 0;
-  const std::array<std::vector<cv::Point2f>, 4> anchors =
-      CollectNormalTraceAnchors(source, availableSides);
+  const std::array<std::vector<NormalTraceAnchorFrame>, 4> anchors =
+        CollectNormalTraceAnchors(source, availableSides);
   evidence.directional_side_count = availableSides;
   if (availableSides != 4) {
     evidence.reason = "DIRECTIONAL_ANCHOR_DOMAIN_MISSING";
@@ -852,11 +1002,11 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   const auto nearestAnchorDistance =
       [&anchors](int direction, const cv::Point &point) {
         double nearest = std::numeric_limits<double>::infinity();
-        for (const cv::Point2f &anchor : anchors[direction]) {
+        for (const NormalTraceAnchorFrame &anchor : anchors[direction]) {
           nearest = std::min(
               nearest,
-              std::hypot(static_cast<double>(point.x) - anchor.x,
-                         static_cast<double>(point.y) - anchor.y));
+              std::hypot(static_cast<double>(point.x) - anchor.point.x,
+                         static_cast<double>(point.y) - anchor.point.y));
         }
         return nearest;
       };
@@ -1026,13 +1176,13 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   for (int segment = 0; segment < 4; ++segment) {
     const int direction = traversal[segment];
     int supportedAnchors = 0;
-    for (const cv::Point2f &anchor : anchors[direction]) {
+    for (const NormalTraceAnchorFrame &anchor : anchors[direction]) {
       double nearest = std::numeric_limits<double>::infinity();
       for (const cv::Point &point : retainedSegments[segment]) {
         nearest = std::min(
             nearest,
-            std::hypot(static_cast<double>(point.x) - anchor.x,
-                       static_cast<double>(point.y) - anchor.y));
+            std::hypot(static_cast<double>(point.x) - anchor.point.x,
+                       static_cast<double>(point.y) - anchor.point.y));
       }
       if (nearest <= retainedAnchorRadius)
         ++supportedAnchors;
@@ -2893,11 +3043,17 @@ void FastMatch::Learn(Image &image) {
             " ann_min_coverage=" +
             std::to_string(
                 m_normal_trace_config.ann_min_component_coverage_percent) +
-            " anchor_radius=" +
-            std::to_string(
-                m_normal_trace_config.anchor_neighborhood_radius_px) +
-            " xy_bin=" +
-            std::to_string(m_normal_trace_config.xy_compression_bin_px));
+             " anchor_radius=" +
+             std::to_string(
+                 m_normal_trace_config.anchor_neighborhood_radius_px) +
+             " prefilter_slope_deg=" +
+             std::to_string(
+                 m_normal_trace_config.ann_tangent_deviation_deg) +
+             " prefilter_normal_deg=" +
+             std::to_string(
+                 m_normal_trace_config.ann_normal_deviation_deg) +
+             " xy_bin=" +
+             std::to_string(m_normal_trace_config.xy_compression_bin_px));
     PointsShape normal_trace_pattern;
     if (LearnPatternByNormalTrace(
             image, *this, input_learn_roi_x, input_learn_roi_y,
@@ -2946,20 +3102,25 @@ void FastMatch::Learn(Image &image) {
                    std::to_string(m_normal_trace_evidence
                                       .normal_pair_counts_by_direction[2]) +
                    "," +
-                   std::to_string(m_normal_trace_evidence
-                                      .normal_pair_counts_by_direction[3]) +
-                   " ann=" +
-                  NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
+                    std::to_string(m_normal_trace_evidence
+                                       .normal_pair_counts_by_direction[3]) +
+                    " anchor_prefilter=" +
+                    NormalTraceAnchorPrefilterSummary(m_normal_trace_evidence) +
+                    " ann=" +
+                   NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
       return;
     }
     CXLOG_WARN("FastMatch", "learn_normal_trace", "fallback",
                "domain=" + std::to_string(m_normal_trace_candidate_count) +
                " trace=" + std::to_string(m_normal_trace_point_count) +
-               " pairs=" + std::to_string(m_normal_trace_pair_count) +
-                " segments=" +
-                std::to_string(m_normal_trace_evidence.trace_segment_count) +
-                " reason=" + m_normal_trace_evidence.reason + " ann=" +
-                NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
+                " pairs=" + std::to_string(m_normal_trace_pair_count) +
+                 " segments=" +
+                 std::to_string(m_normal_trace_evidence.trace_segment_count) +
+                 " reason=" + m_normal_trace_evidence.reason +
+                 " anchor_prefilter=" +
+                 NormalTraceAnchorPrefilterSummary(m_normal_trace_evidence) +
+                 " ann=" +
+                 NormalTraceAnnEvidenceSummary(m_normal_trace_evidence));
   } else {
     m_normal_trace_evidence.reason = "NORMAL_TRACE_DISABLED";
     CXLOG_INFO("FastMatch", "learn_normal_trace", "not_run",

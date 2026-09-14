@@ -5589,6 +5589,35 @@ void ViewController::drawScriptAcceptancePanels() {
         return ImVec2(imagePos.x + static_cast<float>(x) * sx,
                       imagePos.y + static_cast<float>(y) * sy);
       };
+      if (evidence.executed) {
+        const ImVec2 evidenceLabel = ImageToScreenD(
+            fastMatchTool->getlearnmodeloriginx(),
+            fastMatchTool->getlearnmodeloriginy() - 24.0);
+        const std::string prefilterText =
+            "Anchor prefilter band=" +
+            std::to_string(static_cast<int>(
+                std::lround(evidence.anchor_normal_band_px))) +
+            "px accepted=" +
+            std::to_string(evidence.anchor_prefilter_accepted_counts[0]) + "," +
+            std::to_string(evidence.anchor_prefilter_accepted_counts[3]) + "," +
+            std::to_string(evidence.anchor_prefilter_accepted_counts[1]) + "," +
+            std::to_string(evidence.anchor_prefilter_accepted_counts[2]) +
+            " reject(B/S/N)=" +
+            std::to_string(evidence.anchor_band_rejected_counts[0] +
+                           evidence.anchor_band_rejected_counts[1] +
+                           evidence.anchor_band_rejected_counts[2] +
+                           evidence.anchor_band_rejected_counts[3]) + "/" +
+            std::to_string(evidence.anchor_slope_rejected_counts[0] +
+                           evidence.anchor_slope_rejected_counts[1] +
+                           evidence.anchor_slope_rejected_counts[2] +
+                           evidence.anchor_slope_rejected_counts[3]) + "/" +
+            std::to_string(evidence.anchor_normal_rejected_counts[0] +
+                           evidence.anchor_normal_rejected_counts[1] +
+                           evidence.anchor_normal_rejected_counts[2] +
+                           evidence.anchor_normal_rejected_counts[3]);
+        drawList->AddText(evidenceLabel, IM_COL32(255, 220, 110, 255),
+                          prefilterText.c_str());
+      }
       if (m_manualTest.show_fastmatch_normal_trace_domain) {
         const ImU32 domainColors[4] = {
             IM_COL32(255, 190, 75, 145), IM_COL32(95, 225, 255, 145),

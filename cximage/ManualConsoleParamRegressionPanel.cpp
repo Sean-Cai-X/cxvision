@@ -3769,7 +3769,11 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
         "remain unchanged.");
   } else {
     ImGui::TextColored(ImVec4(0.30f, 0.82f, 0.58f, 1.0f),
-                       "READY: Learn will run domain -> ANN cluster -> Dijkstra -> normal pairs.");
+                       "READY: Learn will run FindLine anchors -> local slope/normal "
+                       "prefilter -> ANN -> Dijkstra -> normal pairs.");
+    ImGui::TextDisabled(
+        "The Sobel domain is deterministic image evidence; no random point "
+        "cloud is generated. ANN and Dijkstra cannot see rejected points.");
   }
   edited |= DrawRuntimeIntRow(context, "domain overlap radius px",
       "global_fastmatch_normaltrace_overlap_radius_px", 3, 0, 64, 250.0f);
@@ -3790,13 +3794,16 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_max_trace_gap_px", 3, 1, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "ANN nearest candidates",
       "global_fastmatch_normaltrace_knn_neighbors", 6, 1, 32, 250.0f);
-  ImGui::SeparatorText("ANN Domain Connectivity");
+  ImGui::SeparatorText("Anchor Geometry Prefilter + ANN Connectivity");
   edited |= DrawRuntimeIntRow(context, "ANN base radius px (adaptive up to 2x)",
       "global_fastmatch_normaltrace_ann_radius_px", 32, 6, 256, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "tangent soft-cost tolerance deg",
+  edited |= DrawRuntimeIntRow(context, "anchor/ANN slope tolerance deg",
       "global_fastmatch_normaltrace_ann_tangent_deviation_deg", 35, 1, 89, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "normal soft-cost tolerance deg",
+  edited |= DrawRuntimeIntRow(context, "anchor/ANN scan-normal tolerance deg",
       "global_fastmatch_normaltrace_ann_normal_deviation_deg", 35, 1, 89, 250.0f);
+  ImGui::TextDisabled(
+      "Before ANN: nearest FindLine conclusion -> adjacent-point slope -> "
+      "Gauge scan normal. Candidates failing either angle are rejected.");
   edited |= DrawRuntimeIntRow(context, "minimum component points",
       "global_fastmatch_normaltrace_ann_min_component_points", 4, 2, 256, 250.0f);
   edited |= DrawRuntimeIntRow(context, "minimum component coverage %",
@@ -3808,6 +3815,22 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_xy_compression_bin_px", 4, 1, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "minimum keypoints per direction",
       "global_fastmatch_normaltrace_min_keypoints_per_domain", 4, 2, 256, 250.0f);
+  {
+    const int effectiveBand = std::max(
+        2, std::min(RuntimeIntOr(context,
+                                 "global_fastmatch_normaltrace_anchor_radius_px", 24),
+                    std::max(RuntimeIntOr(
+                                 context,
+                                 "global_fastmatch_normaltrace_pair_offset_px", 6),
+                             RuntimeIntOr(
+                                 context,
+                                 "global_fastmatch_normaltrace_xy_compression_bin_px", 4) *
+                                 2)));
+    ImGui::TextDisabled(
+        "Effective pre-Dijkstra normal band: %d px "
+        "(max(pair offset, 2 x XY bin), capped by anchor radius)",
+        effectiveBand);
+  }
   ImGui::SeparatorText("Normal Pair Geometry");
   edited |= DrawRuntimeIntRow(context, "normal angle tolerance deg",
       "global_fastmatch_normaltrace_angle_tolerance_deg", 20, 1, 90, 250.0f);
@@ -4217,7 +4240,21 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
                 object->fastmatch_normal_trace_pair_direction_counts[0],
                 object->fastmatch_normal_trace_pair_direction_counts[1],
                 object->fastmatch_normal_trace_pair_direction_counts[2],
-                object->fastmatch_normal_trace_pair_direction_counts[3]);
+                 object->fastmatch_normal_trace_pair_direction_counts[3]);
+    ImGui::Text("anchor prefilter normal band=%.1f px",
+                object->fastmatch_normal_trace_anchor_normal_band_px);
+    static const char *prefilterDirectionNames[4] = {
+        "Top", "Bottom", "Left", "Right"};
+    for (int direction = 0; direction < 4; ++direction) {
+      ImGui::Text(
+          "%s anchor near/accepted=%d/%d | rejected band/slope/normal=%d/%d/%d",
+          prefilterDirectionNames[direction],
+          object->fastmatch_normal_trace_anchor_near_counts[direction],
+          object->fastmatch_normal_trace_anchor_accepted_counts[direction],
+          object->fastmatch_normal_trace_anchor_band_rejected_counts[direction],
+          object->fastmatch_normal_trace_anchor_slope_rejected_counts[direction],
+          object->fastmatch_normal_trace_anchor_normal_rejected_counts[direction]);
+    }
     ImGui::Text("Top domain/key=%d/%d | Bottom=%d/%d | Left=%d/%d | Right=%d/%d",
                 object->fastmatch_normal_trace_domain_counts[0],
                 object->fastmatch_normal_trace_keypoint_counts[0],

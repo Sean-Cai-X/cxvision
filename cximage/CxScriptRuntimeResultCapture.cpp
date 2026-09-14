@@ -1081,6 +1081,18 @@ bool CaptureFastMatchResult(
         normal_trace.loop_erased_point_count;
     normal_trace_capture.normal_pair_counts_by_direction =
         normal_trace.normal_pair_counts_by_direction;
+    normal_trace_capture.anchor_normal_band_px =
+        normal_trace.anchor_normal_band_px;
+    normal_trace_capture.anchor_near_candidate_counts =
+        normal_trace.anchor_near_candidate_counts;
+    normal_trace_capture.anchor_band_rejected_counts =
+        normal_trace.anchor_band_rejected_counts;
+    normal_trace_capture.anchor_slope_rejected_counts =
+        normal_trace.anchor_slope_rejected_counts;
+    normal_trace_capture.anchor_normal_rejected_counts =
+        normal_trace.anchor_normal_rejected_counts;
+    normal_trace_capture.anchor_prefilter_accepted_counts =
+        normal_trace.anchor_prefilter_accepted_counts;
     normal_trace_capture.domain_deduplicated_counts =
         normal_trace.domain_deduplicated_counts;
     normal_trace_capture.compressed_keypoint_counts =

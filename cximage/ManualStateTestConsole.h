@@ -516,6 +516,12 @@ struct RuntimeObjectView {
   int fastmatch_normal_trace_corner_rejected = 0;
   int fastmatch_normal_trace_loop_erased_points = 0;
   std::array<int, 4> fastmatch_normal_trace_pair_direction_counts{};
+  double fastmatch_normal_trace_anchor_normal_band_px = 0.0;
+  std::array<int, 4> fastmatch_normal_trace_anchor_near_counts{};
+  std::array<int, 4> fastmatch_normal_trace_anchor_band_rejected_counts{};
+  std::array<int, 4> fastmatch_normal_trace_anchor_slope_rejected_counts{};
+  std::array<int, 4> fastmatch_normal_trace_anchor_normal_rejected_counts{};
+  std::array<int, 4> fastmatch_normal_trace_anchor_accepted_counts{};
   std::array<int, 4> fastmatch_normal_trace_domain_counts{};
   std::array<int, 4> fastmatch_normal_trace_keypoint_counts{};
   std::array<int, 4> fastmatch_normal_trace_ann_edge_counts{};
