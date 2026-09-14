@@ -5899,6 +5899,8 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   staged.key_parameter_edit_revision = 0;
   staged.last_key_parameter_edit_summary =
       "evidence selection baseline: " + resolved.script_id;
+  staged.fastmatch_last_requested_revision = 0;
+  staged.fastmatch_last_requested_action = 0;
 
   staged.manual_operation_trace_sequence = 0;
   staged.pending_manual_operation_trace_events.clear();

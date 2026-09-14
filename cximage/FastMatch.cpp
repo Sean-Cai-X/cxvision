@@ -7519,15 +7519,15 @@ void FastMatch::PublishDisplayShapes(ICxShapeSink &sink,
                      std::move(expected_shape));
   }
 
-  const auto &model_points = getmodel();
-  if (!model_points.empty()) {
-    auto model_shape = std::make_unique<PointsShape>();
-    for (const auto &pt : model_points) {
-      model_shape->addpoint(pt.x, pt.y);
-    }
-    sink.UpsertShape(owner_ref + ".model_points", "FastMatch", owner_ref, "",
-                     "model", false, false, std::move(model_shape));
-  }
+  // FastMatch normalizes the learned A/B template to a zero-origin matcher
+  // coordinate frame. Publishing getmodel() as an Image View ShapeElement
+  // therefore placed local template points directly into global image space.
+  // That created a second, upper-left-shifted white trace beside the actual
+  // Gauge/ANN/Dijkstra evidence. The Image View's explicit Learn Result layer
+  // reconstructs A/B points with m_learn_model_origin_{x,y}; it is the only
+  // valid global projection and remains user-controlled by its display check.
+  // Intentionally do not publish owner_ref + ".model_points" here. The runtime
+  // owner generation closes this stale element on the next publish.
 
   const int candidate_count = getresultcandidatecount();
   if (candidate_count > 0) {

@@ -1805,6 +1805,10 @@ struct ManualTestContext {
 
   unsigned long long key_parameter_edit_revision = 0;
   std::string last_key_parameter_edit_summary;
+  // Revision captured by the most recent FastMatch action. This lets the UI
+  // distinguish newly edited parameters from the snapshot being executed.
+  unsigned long long fastmatch_last_requested_revision = 0;
+  int fastmatch_last_requested_action = 0;
   bool apply_gauge_to_shape_requested = false;
   std::string pending_annotation_tool_id;
   std::string pending_annotation_tool_reason;

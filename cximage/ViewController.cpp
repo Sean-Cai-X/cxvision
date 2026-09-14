@@ -5668,7 +5668,7 @@ void ViewController::drawScriptAcceptancePanels() {
         annComponents += evidence.ann_component_counts[direction];
         annSelected += evidence.ann_selected_point_counts[direction];
       }
-      const std::string label =
+      std::string label =
           evidence.reason == "NORMAL_TRACE_DISABLED" ||
                   evidence.reason == "NOT_RUN"
               ? "Normal trace NOT_RUN: enable Normal-Trace Learn, then click Learn"
@@ -5688,6 +5688,17 @@ void ViewController::drawScriptAcceptancePanels() {
                     std::to_string(static_cast<int>(std::lround(
                         evidence.gradient_coverage * 100.0))) +
                     "% " + evidence.reason;
+      label = "Learn rev=" +
+              std::to_string(m_manualTest.fastmatch_last_requested_revision) +
+              " | " + label;
+      if (m_manualTest.show_fastmatch_normal_trace_path &&
+          evidence.dijkstra_trace_points.size() < 2) {
+        label += " | selected Dijkstra=UNAVAILABLE";
+      }
+      if (m_manualTest.show_fastmatch_normal_trace_pairs &&
+          evidence.normal_pair_a.empty()) {
+        label += " | selected NormalPairs=UNAVAILABLE";
+      }
       drawList->AddText(ImageToScreenD(learnX, learnY - 28.0),
                         evidence.succeeded ? IM_COL32(90, 235, 170, 255)
                                            : IM_COL32(255, 135, 95, 255),

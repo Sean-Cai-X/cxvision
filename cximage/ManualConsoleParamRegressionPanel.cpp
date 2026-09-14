@@ -3225,6 +3225,7 @@ static bool DrawFindObjectComponentControls(ManualTestContext &context) {
 static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   ManualGaugeState &gauge = context.current_gauge;
   bool edited = false;
+  bool sharedParamsEdited = false;
   ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Learn Setup");
   ImGui::TextDisabled("Maps to: setrect + setscanrotation + setobjfilter + "
                       "SetWHgap + setthre + setlinegap + "
@@ -3242,47 +3243,64 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
 
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
-  edited |= ImGui::InputInt("##fm_learn_threshold_value", &gauge.threshold);
+  const bool thresholdEdited =
+      ImGui::InputInt("##fm_learn_threshold_value", &gauge.threshold);
+  edited |= thresholdEdited;
+  sharedParamsEdited |= thresholdEdited;
   gauge.threshold = std::max(0, std::min(255, gauge.threshold));
 
   ImGui::TextUnformatted("learn_method");
   ImGui::SameLine(130.0f);
   const char *methods[] = {"0", "1", "2", "3"};
   ImGui::SetNextItemWidth(100.0f);
-  edited |= ImGui::Combo("##fm_learn_method", &gauge.method, methods,
-                         IM_ARRAYSIZE(methods));
+  const bool methodEdited = ImGui::Combo(
+      "##fm_learn_method", &gauge.method, methods, IM_ARRAYSIZE(methods));
+  edited |= methodEdited;
+  sharedParamsEdited |= methodEdited;
 
   ImGui::TextUnformatted("learn_linegap");
   ImGui::SameLine(130.0f);
   ImGui::SetNextItemWidth(180.0f);
-  edited |= ImGui::SliderInt("##fm_learn_linegap", &gauge.linegap, 0, 50);
+  bool linegapEdited =
+      ImGui::SliderInt("##fm_learn_linegap", &gauge.linegap, 0, 50);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
-  edited |= ImGui::InputInt("##fm_learn_linegap_value", &gauge.linegap);
+  linegapEdited |=
+      ImGui::InputInt("##fm_learn_linegap_value", &gauge.linegap);
+  edited |= linegapEdited;
+  sharedParamsEdited |= linegapEdited;
   gauge.linegap = std::max(0, std::min(50, gauge.linegap));
 
   ImGui::TextUnformatted("learn_wgap");
   ImGui::SameLine(130.0f);
   ImGui::SetNextItemWidth(180.0f);
-  edited |= ImGui::SliderInt("##fm_learn_wgap", &gauge.wgap, 0, 100);
+  bool wgapEdited = ImGui::SliderInt("##fm_learn_wgap", &gauge.wgap, 0, 100);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
-  edited |= ImGui::InputInt("##fm_learn_wgap_value", &gauge.wgap);
+  wgapEdited |= ImGui::InputInt("##fm_learn_wgap_value", &gauge.wgap);
+  edited |= wgapEdited;
+  sharedParamsEdited |= wgapEdited;
   gauge.wgap = std::max(0, std::min(100, gauge.wgap));
 
   ImGui::TextUnformatted("learn_hgap");
   ImGui::SameLine(130.0f);
   ImGui::SetNextItemWidth(180.0f);
-  edited |= ImGui::SliderInt("##fm_learn_hgap", &gauge.hgap, 0, 100);
+  bool hgapEdited = ImGui::SliderInt("##fm_learn_hgap", &gauge.hgap, 0, 100);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
-  edited |= ImGui::InputInt("##fm_learn_hgap_value", &gauge.hgap);
+  hgapEdited |= ImGui::InputInt("##fm_learn_hgap_value", &gauge.hgap);
+  edited |= hgapEdited;
+  sharedParamsEdited |= hgapEdited;
   gauge.hgap = std::max(0, std::min(100, gauge.hgap));
 
-  edited |= DrawRuntimeIntRow(context, "objfilter", "global_objfilter", 1, 0,
-                              10, 130.0f);
-  edited |= DrawRuntimeIntRow(context, "compare_gap", "global_compare_gap", 20,
-                              1, 200, 130.0f);
+  const bool objfilterEdited = DrawRuntimeIntRow(
+      context, "objfilter", "global_objfilter", 1, 0, 10, 130.0f);
+  edited |= objfilterEdited;
+  sharedParamsEdited |= objfilterEdited;
+  const bool compareGapEdited = DrawRuntimeIntRow(
+      context, "compare_gap", "global_compare_gap", 20, 1, 200, 130.0f);
+  edited |= compareGapEdited;
+  sharedParamsEdited |= compareGapEdited;
   edited |= DrawRuntimeIntRow(context, "scan rotation deg",
                               "global_fastmatch_scan_rotation_deg", 0, -180,
                               180, 130.0f);
@@ -3291,12 +3309,14 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
                       "and negative degrees rotate the four learn probe bands "
                       "around the Learn ROI center before learn/match.");
 
-  edited |=
-      ImGui::SliderInt("##fm_learn_filterprofile", &gauge.filterprofile, 0, 10);
+  bool filterprofileEdited = ImGui::SliderInt(
+      "##fm_learn_filterprofile", &gauge.filterprofile, 0, 10);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0f);
-  edited |=
-      ImGui::InputInt("##fm_learn_filterprofile_value", &gauge.filterprofile);
+  filterprofileEdited |= ImGui::InputInt("##fm_learn_filterprofile_value",
+                                         &gauge.filterprofile);
+  edited |= filterprofileEdited;
+  sharedParamsEdited |= filterprofileEdited;
   gauge.filterprofile = std::max(0, std::min(10, gauge.filterprofile));
 
   InjectManualGaugeInt(context, "global_threshold", gauge.threshold);
@@ -3346,20 +3366,19 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
         compareGap);
   };
 
-  // Copy is an explicit write operation.  The old per-frame copy made the
-  // directional table look valid while silently replacing its real values
-  // with the shared values, which is exactly the misleading UI state that
-  // caused paired Top/Bottom and Left/Right values to disappear.
-  const bool copySharedNow =
-      (sharedModeChanged && shared != 0) ||
+  // Shared mode makes each shared edit one explicit write to all directions.
+  // Never copy per frame because that would destroy intentionally independent
+  // directional values.
+  const bool copySharedButton =
       ImGui::Button("Copy Shared Learn Params To 4 Directions");
+  const bool copySharedNow = copySharedButton ||
+      (shared != 0 && (sharedModeChanged || sharedParamsEdited));
   if (copySharedNow) {
     for (int dir = 0; dir < 4; ++dir) {
       seedDirection(dir, gauge.threshold, gauge.method, gauge.linegap,
                     gauge.wgap, gauge.hgap, sharedObjfilter, sharedCompareGap);
     }
-    if (shared == 0)
-      edited = true;
+    edited = true;
   }
 
   ImGui::SameLine();
@@ -3815,6 +3834,10 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
   ImGui::SameLine();
   ImGui::Checkbox("Show normal A/B pairs",
                   &context.show_fastmatch_normal_trace_pairs);
+  ImGui::TextDisabled(
+      "Display selections persist across Learn. After each run, checked layers "
+      "are rebound to that revision; an unavailable layer reports its failure "
+      "reason instead of retaining an older result.");
   ImGui::TextDisabled("FindLine supplies directional anchors. Each anchor "
                       "neighbourhood is de-duplicated and compressed in local "
                       "u/v, ANN spatially re-clusters it, and Dijkstra runs only "
@@ -3873,6 +3896,17 @@ static bool DrawGridPatternParameterControls(ManualTestContext &context) {
 
 static void RequestFastMatchRunAction(ManualTestContext &context,
                                       int actionCode, const char *actionLabel) {
+  // A checked diagnostic is a persistent display preference. Ensure the
+  // FastMatch debug projection remains enabled when Learn replaces the runtime
+  // object, so the latest revision is rendered without another checkbox click.
+  if (context.show_fastmatch_learn_result ||
+      context.show_fastmatch_learn_scan_ticks ||
+      context.show_fastmatch_normal_trace_domain ||
+      context.show_fastmatch_normal_trace_ann_component ||
+      context.show_fastmatch_normal_trace_path ||
+      context.show_fastmatch_normal_trace_pairs) {
+    context.show_fastmatch_debug_vectors = true;
+  }
   InjectManualGaugeInt(context, "global_fastmatch_action", actionCode);
   context.current_gauge.dirty = true;
   context.current_gauge.review_status = "editing";
@@ -3883,6 +3917,9 @@ static void RequestFastMatchRunAction(ManualTestContext &context,
     context.pending_execution_gauge = context.current_gauge;
     context.pending_execution_globals = context.runtime_int_vars;
     context.has_pending_execution_snapshot = true;
+    context.fastmatch_last_requested_revision =
+        context.key_parameter_edit_revision;
+    context.fastmatch_last_requested_action = actionCode;
     context.debug_status = "FASTMATCH_RUN_REQUESTED";
     context.debug_reason =
         std::string(actionLabel == nullptr ? "FastMatch action" : actionLabel) +
@@ -9536,7 +9573,25 @@ if (isCxTextInspect) {
           context.last_key_parameter_edit_summary +=
               " scan_rotation_deg=" +
               std::to_string(RuntimeIntOr(
-                  context, "global_fastmatch_scan_rotation_deg", 0));
+                  context, "global_fastmatch_scan_rotation_deg", 0)) +
+              " compare_gap_shared=" +
+              std::to_string(RuntimeIntOr(context, "global_compare_gap", 20)) +
+              " learn_shared=" +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_learn_shared", 1)) +
+              " compare_gap_directions=(" +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_learn_compare_gap_0", 20)) +
+              "," +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_learn_compare_gap_1", 20)) +
+              "," +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_learn_compare_gap_2", 20)) +
+              "," +
+              std::to_string(RuntimeIntOr(
+                  context, "global_fastmatch_learn_compare_gap_3", 20)) +
+              ")";
         }
         if (isGridPattern) {
           context.last_key_parameter_edit_summary +=
@@ -9613,6 +9668,114 @@ if (isCxTextInspect) {
     if (ImGui::Button("Learn + Match", ImVec2(fmBtnWidth, 0)))
       RequestFastMatchRunAction(context, 3, "FastMatch Learn + Match");
     ImGui::PopID();
+    const unsigned long long editedRevision =
+        context.key_parameter_edit_revision;
+    const unsigned long long submittedRevision =
+        context.fastmatch_last_requested_revision;
+    const bool revisionNotSubmitted = editedRevision > submittedRevision;
+    const bool executionPending = context.has_pending_execution_snapshot ||
+                                  context.run_state == "running";
+    ImGui::Text("Parameter revision: edited=%llu | submitted=%llu",
+                editedRevision, submittedRevision);
+    if (revisionNotSubmitted) {
+      ImGui::TextColored(
+          ImVec4(0.95f, 0.68f, 0.15f, 1.0f),
+          "PARAMETERS_NOT_RUN: revision %llu changed. Click Learn or Learn + Match to apply it.",
+          editedRevision);
+    } else if (submittedRevision > 0 && executionPending) {
+      ImGui::TextColored(
+          ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+          "REVISION_QUEUED: revision %llu is queued/running (action=%d).",
+          submittedRevision, context.fastmatch_last_requested_action);
+    } else if (submittedRevision > 0) {
+      ImGui::TextColored(
+          ImVec4(0.42f, 0.85f, 0.52f, 1.0f),
+          "REVISION_SUBMITTED: revision %llu was submitted. Runtime status: %s",
+          submittedRevision, context.debug_status.c_str());
+    } else {
+      ImGui::TextDisabled(
+          "No edited parameter revision has been submitted in this Evidence session.");
+    }
+    const int sharedLearnMode =
+        RuntimeIntOr(context, "global_fastmatch_learn_shared", 1);
+    ImGui::TextWrapped(
+        "Effective compare gap: mode=%s | shared=%d | Top=%d Bottom=%d Left=%d Right=%d",
+        sharedLearnMode != 0 ? "shared" : "directional",
+        RuntimeIntOr(context, "global_compare_gap", 20),
+        RuntimeIntOr(context, "global_fastmatch_learn_compare_gap_0", 20),
+        RuntimeIntOr(context, "global_fastmatch_learn_compare_gap_1", 20),
+        RuntimeIntOr(context, "global_fastmatch_learn_compare_gap_2", 20),
+        RuntimeIntOr(context, "global_fastmatch_learn_compare_gap_3", 20));
+    if (submittedRevision > 0 && !executionPending) {
+      const RuntimeObjectView *latestObject = FindCurrentFastMatchObject(context);
+      if (latestObject == nullptr) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.45f, 0.35f, 1.0f),
+            "DISPLAY_UNAVAILABLE: revision %llu has no current FastMatch runtime object.",
+            submittedRevision);
+      } else {
+        ImGui::Text("Latest Learn display (revision %llu):",
+                    submittedRevision);
+        if (context.show_fastmatch_learn_result) {
+          const int pairCount = std::min(latestObject->fastmatch_pattern_a_count,
+                                         latestObject->fastmatch_pattern_b_count);
+          ImGui::BulletText("Learn Result: %s (%d pairs, status=%d)",
+                            pairCount > 0 ? "VISIBLE" : "UNAVAILABLE",
+                            pairCount,
+                            latestObject->fastmatch_learn_status_code);
+        }
+        if (context.show_fastmatch_normal_trace_domain) {
+          ImGui::BulletText(
+              "De-duplicated Domain: %s (%d points)",
+              latestObject->fastmatch_normal_trace_domain_count > 0
+                  ? "VISIBLE"
+                  : "UNAVAILABLE",
+              latestObject->fastmatch_normal_trace_domain_count);
+        }
+        if (context.show_fastmatch_normal_trace_ann_component) {
+          int annSelected = 0;
+          for (int count : latestObject->fastmatch_normal_trace_ann_selected_counts)
+            annSelected += count;
+          ImGui::BulletText("ANN Selected Component: %s (%d points)",
+                            annSelected > 0 ? "VISIBLE" : "UNAVAILABLE",
+                            annSelected);
+        }
+        if (context.show_fastmatch_normal_trace_path) {
+          ImGui::BulletText(
+              "Dijkstra Trace: %s (%d points)",
+              latestObject->fastmatch_normal_trace_path_count >= 2
+                  ? "VISIBLE"
+                  : "UNAVAILABLE",
+              latestObject->fastmatch_normal_trace_path_count);
+        }
+        if (context.show_fastmatch_normal_trace_pairs) {
+          ImGui::BulletText(
+              "Normal A/B Pairs: %s (%d pairs)",
+              latestObject->fastmatch_normal_trace_pair_count > 0
+                  ? "VISIBLE"
+                  : "UNAVAILABLE",
+              latestObject->fastmatch_normal_trace_pair_count);
+        }
+        if ((context.show_fastmatch_normal_trace_path &&
+             latestObject->fastmatch_normal_trace_path_count < 2) ||
+            (context.show_fastmatch_normal_trace_pairs &&
+             latestObject->fastmatch_normal_trace_pair_count <= 0)) {
+          ImGui::TextWrapped("Selected Normal-Trace layer failure: %s",
+                             latestObject->fastmatch_normal_trace_reason.c_str());
+          if (context.show_fastmatch_learn_result &&
+              latestObject->fastmatch_pattern_a_count > 0 &&
+              latestObject->fastmatch_pattern_b_count > 0) {
+            ImGui::TextDisabled(
+                "The latest fallback Learn model is shown by Learn Result; it "
+                "is not mislabeled as a Dijkstra/Normal-Trace result.");
+          }
+        }
+      }
+    }
+    if (!context.last_key_parameter_edit_summary.empty()) {
+      ImGui::TextWrapped("Last edit: %s",
+                         context.last_key_parameter_edit_summary.c_str());
+    }
     ImGui::Separator();
   }
   ImGui::TextUnformatted("Actions");
