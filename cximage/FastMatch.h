@@ -12,6 +12,8 @@
 #include "FindLine.h"
 #include "FastMatchTransform.h"
 #include "CxCalibration.h"
+#include "CxFastMatchShapeModel.h"
+#include "FormfitGauge.h"
 #include "Grid.h"
 #include <opencv2/core/mat.hpp>
 
@@ -212,6 +214,10 @@ public:
         std::vector<CxShapePoint> derived_junction_points;
         // Retained after domain overlap de-duplication; raw count is exposed
         // separately so the display stays bounded.
+        // Raw directional FindLine anchors are retained even when every point
+        // is rejected by the slope/domain prefilter.  A failed Evidence case
+        // must show the last valid measurement facts instead of an empty ROI.
+        std::array<std::vector<CxShapePoint>, 4> anchor_points_by_direction;
         std::vector<CxShapePoint> domain_points;
         std::array<std::vector<CxShapePoint>, 4> domain_points_by_direction;
         std::array<std::vector<CxShapePoint>, 4> compressed_points_by_direction;
@@ -311,6 +317,39 @@ public:
     int getnormaltracepaircount() { return m_normal_trace_pair_count; }
     const NormalTraceEvidence& getnormaltraceevidence() const
     { return m_normal_trace_evidence; }
+    // P0-P6 dense form-fit controls.  FastMatch owns both shape models and the
+    // correspondence solve; FormfitGauge is a read-only value bridge.
+    void setformfitenabled(int enabled);
+    void setformfitdenseparams(int dense_step_milli_px,
+                               int profile_half_width_milli_px,
+                               int profile_step_milli_px,
+                               int minimum_gradient,
+                               int curvature_threshold_millideg);
+    void setformfitannparams(int search_radius_milli_px,
+                             int normal_tolerance_deg,
+                             int trim_percent,
+                             int minimum_mutual_pairs,
+                             int maximum_iterations);
+    void setformfitbudget(int maximum_elapsed_ms,
+                          int maximum_structural_anchors,
+                          int allow_nonuniform_affine);
+    const CxFastMatchFormFitConfig& getformfitconfig() const
+    { return m_formfit_config; }
+    const CxFastMatchShapeModel& getreferenceshapemodel() const
+    { return m_reference_shape_model; }
+    const CxFastMatchShapeModel& getobservedshapemodel() const
+    { return m_observed_shape_model; }
+    const CxFastMatchFormFitResult& getformfitresult() const
+    { return m_formfit_result; }
+    const cxcore::formfit::FormfitGauge& getformfitgauge() const
+    { return m_formfit_gauge; }
+    int getformfitstatuscode();
+    int getformfitreferencecount();
+    int getformfitobservedcount();
+    int getformfitmutualcount();
+    int getformfitanchorcount();
+    double getformfitscore();
+    double getformfitresidual();
     // Model points are normalized for matching.  These values retain the
     // original-image translation needed by the Image View debug projection.
     double getlearnmodeloriginx() { return m_learn_model_origin_x; }
@@ -703,6 +742,10 @@ public:
 private:
     LearnDirectionParams& learnDirectionParams(int direction);
     void runDirectionalFindLineProbes(Image& image);
+    void buildReferenceFormFitModel(Image& image);
+    void runFormFitOnImage(Image& image, const FastMatchTransform& seed,
+                           const char* observed_model_id);
+    void refreshFormFitGauge();
 
     int m_istyle;
     Image* g_pmodelimage;
@@ -812,6 +855,11 @@ private:
     int m_normal_trace_point_count = 0;
     int m_normal_trace_pair_count = 0;
     NormalTraceEvidence m_normal_trace_evidence;
+    CxFastMatchFormFitConfig m_formfit_config;
+    CxFastMatchShapeModel m_reference_shape_model;
+    CxFastMatchShapeModel m_observed_shape_model;
+    CxFastMatchFormFitResult m_formfit_result;
+    cxcore::formfit::FormfitGauge m_formfit_gauge;
     double m_learn_model_origin_x = 0.0;
     double m_learn_model_origin_y = 0.0;
 

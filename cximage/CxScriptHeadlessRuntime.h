@@ -8,6 +8,8 @@
 #include <vector>
 #include <map>
 #include "CxRuntimeProjectionTypes.h"
+#include "CxFastMatchShapeModel.h"
+#include "FormfitGauge.h"
 
 struct CxFindObjectMeasurementEvidence
 {
@@ -184,6 +186,17 @@ struct CxFastMatchNormalTraceEvidence
     std::array<double, 4> derived_junction_cross_angle_deg{};
     std::array<double, 4> derived_junction_current_extrapolation_px{};
     std::array<double, 4> derived_junction_next_extrapolation_px{};
+    // Per-domain point snapshots make ANN re-clustering and Dijkstra source
+    // selection directly reviewable when a later junction stage rejects the
+    // cycle. These are value snapshots; they never feed the algorithm back.
+    std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>
+        anchor_points_by_direction;
+    std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>
+        domain_points_by_direction;
+    std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>
+        compressed_points_by_direction;
+    std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>
+        ann_selected_points_by_direction;
     std::vector<CxFastMatchNormalTracePointEvidence> derived_junction_points;
     std::vector<CxFastMatchNormalTracePointEvidence> dijkstra_trace_points;
     std::vector<int> dijkstra_source_directions;
@@ -528,6 +541,10 @@ struct CxScriptExecutionCapture
     int fastmatch_rotate_elapsed_ms = 0;
 
     CxFastMatchNormalTraceEvidence fastmatch_normal_trace;
+    CxFastMatchShapeModel fastmatch_reference_shape_model;
+    CxFastMatchShapeModel fastmatch_observed_shape_model;
+    CxFastMatchFormFitResult fastmatch_form_fit;
+    cxcore::formfit::FormfitGauge fastmatch_form_fit_gauge;
 
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;
@@ -721,6 +738,14 @@ struct CxScriptHeadlessOptions
     double torch_class_loss_weight = 1.0;
     double torch_dfl_loss_weight = 1.0;
     double torch_mask_loss_weight = 1.0;
+    bool torch_use_assignment_quality_targets = true;
+    int torch_assignment_quality_warmup_epochs = 3;
+    // Inference-set contract controls.  These defaults are visible values,
+    // not executor constants; callers may override every field.
+    double torch_postprocess_confidence_threshold = 0.25;
+    double torch_postprocess_iou_threshold = 0.45;
+    int torch_postprocess_max_detections = 20;
+    bool torch_postprocess_class_agnostic_nms = true;
     std::string output_dir;
 
     std::string globals_path;

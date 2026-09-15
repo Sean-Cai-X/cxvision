@@ -2,6 +2,7 @@
 
 #include "torch_nnmodule.h"
 
+#include <algorithm>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -279,6 +280,11 @@ struct YoloV8SegWeightMappingReport
     int source_count = 0;
     int target_count = 0;
     int loaded_count = 0;
+    // Classifier outputs may be deliberately reinitialized when a mature
+    // parent is transferred to a different, explicitly declared ontology.
+    // Keeping this separate from a shape mismatch makes the exception
+    // auditable and prevents a permissive partial state load.
+    std::vector<std::string> reinitialized_keys;
     std::vector<std::string> missing_keys;
     std::vector<std::string> unknown_keys;
     std::vector<std::string> shape_mismatches;
@@ -291,13 +297,22 @@ struct YoloV8SegWeightMappingReport
                unknown_keys.empty() &&
                shape_mismatches.empty();
     }
+
+    bool transfer_complete() const
+    {
+        return loaded_count + static_cast<int>(reinitialized_keys.size()) ==
+                   target_count &&
+               missing_keys.empty() && unknown_keys.empty() &&
+               shape_mismatches.empty() && !reinitialized_keys.empty();
+    }
 };
 
 class YoloV8SegmentImpl : public torch::nn::Module
 {
 public:
-    YoloV8SegmentImpl()
+    explicit YoloV8SegmentImpl(int64_t num_classes = 80)
     {
+        TORCH_CHECK(num_classes > 0, "YOLOv8-Seg num_classes must be positive");
         model = register_module("model", torch::nn::ModuleList());
         model->push_back(m0 = ConvModule(3, 16, 3, 2));
         model->push_back(m1 = ConvModule(16, 32, 3, 2));
@@ -321,7 +336,7 @@ public:
         model->push_back(m19 = ConvModule(128, 128, 3, 2));
         model->push_back(m20 = YoloV8SegConcat());
         model->push_back(m21 = YoloV8SegC2f(384, 256, 1, false));
-        model->push_back(m22 = YoloV8SegmentHead(80, 32, 64));
+        model->push_back(m22 = YoloV8SegmentHead(num_classes, 32, 64));
     }
 
     YoloV8SegRawOutput forward(const torch::Tensor& input)
@@ -386,7 +401,6 @@ public:
         YoloV8SegWeightMappingReport report;
         report.source_count = static_cast<int>(source.size());
         report.target_count = static_cast<int>(targets.size());
-        torch::NoGradGuard no_grad;
         for (auto& target : targets)
         {
             const auto found = source.find(target.first);
@@ -403,7 +417,6 @@ public:
                 report.shape_mismatches.push_back(reason.str());
                 continue;
             }
-            target.second->copy_(found->second);
             ++report.loaded_count;
         }
         for (const auto& item : source)
@@ -411,9 +424,121 @@ public:
             if (targets.find(item.first) == targets.end())
                 report.unknown_keys.push_back(item.first);
         }
-        TORCH_CHECK(
-            report.complete(),
-            "YOLOv8-Seg strict state-dict mapping is incomplete");
+        // Phase A only inspects keys and tensor metadata.  A failed strict
+        // mapping must leave the V1 baseline untouched so callers can retain
+        // a reproducible parent for parity and rollback.
+        TORCH_CHECK(report.complete(),
+                    "YOLOv8-Seg strict state-dict mapping is incomplete");
+
+        // Phase B is entered only after the complete report is known.  This
+        // makes the strict load atomic at the model-state level.
+        torch::NoGradGuard no_grad;
+        for (auto& target : targets)
+        {
+            const auto found = source.find(target.first);
+            TORCH_CHECK(found != source.end(),
+                        "strict mapping changed between inspection and copy");
+            target.second->copy_(found->second);
+        }
+        return report;
+    }
+
+    // Controlled ontology transfer.  All parent tensors remain strict except
+    // the last convolution of the class branches.  Those outputs are kept at
+    // their freshly initialized target-ontology values; no parent class score
+    // is silently reinterpreted as a business geometry class.
+    YoloV8SegWeightMappingReport load_state_dict_transfer_classifier(
+        const std::string& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        TORCH_CHECK(input.good(), "failed to open YOLOv8-Seg state dict");
+        const std::vector<char> bytes(
+            (std::istreambuf_iterator<char>(input)),
+            std::istreambuf_iterator<char>());
+        const torch::IValue payload = torch::pickle_load(bytes);
+        TORCH_CHECK(payload.isGenericDict(),
+                    "YOLOv8-Seg asset must be a GenericDict state dict");
+
+        std::map<std::string, torch::Tensor> source;
+        for (const auto& item : payload.toGenericDict())
+        {
+            TORCH_CHECK(item.key().isString() && item.value().isTensor(),
+                        "YOLOv8-Seg state dict must contain string->tensor entries");
+            source.emplace(item.key().toStringRef(), item.value().toTensor());
+        }
+        auto parameters = named_parameters(true);
+        auto buffers = named_buffers(true);
+        std::map<std::string, torch::Tensor*> targets;
+        for (auto& item : parameters)
+            targets.emplace(item.key(), &item.value());
+        for (auto& item : buffers)
+            targets.emplace(item.key(), &item.value());
+
+        auto is_classifier_output_transfer = [](
+            const std::string& key,
+            const torch::Tensor& target,
+            const torch::Tensor& parent) {
+            if (key.find(".cv3.") == std::string::npos ||
+                target.dim() != parent.dim() || target.dim() < 1 ||
+                target.size(0) == parent.size(0))
+                return false;
+            for (int64_t dim = 1; dim < target.dim(); ++dim)
+            {
+                if (target.size(dim) != parent.size(dim))
+                    return false;
+            }
+            // Only a Conv2d output weight or its matching bias can differ.
+            return target.dim() == 4 || target.dim() == 1;
+        };
+
+        YoloV8SegWeightMappingReport report;
+        report.source_count = static_cast<int>(source.size());
+        report.target_count = static_cast<int>(targets.size());
+        for (auto& target : targets)
+        {
+            const auto found = source.find(target.first);
+            if (found == source.end())
+            {
+                report.missing_keys.push_back(target.first);
+                continue;
+            }
+            if (target.second->sizes() != found->second.sizes())
+            {
+                if (is_classifier_output_transfer(
+                        target.first, *target.second, found->second))
+                {
+                    report.reinitialized_keys.push_back(target.first);
+                    continue;
+                }
+                std::ostringstream reason;
+                reason << target.first << " target=" << target.second->sizes()
+                       << " source=" << found->second.sizes();
+                report.shape_mismatches.push_back(reason.str());
+                continue;
+            }
+            ++report.loaded_count;
+        }
+        for (const auto& item : source)
+        {
+            if (targets.find(item.first) == targets.end())
+                report.unknown_keys.push_back(item.first);
+        }
+        // Phase A validates the complete transfer plan before copying any
+        // parent feature.  The classifier remains an intentional fresh head.
+        TORCH_CHECK(report.transfer_complete(),
+                    "YOLOv8-Seg classifier transfer mapping is incomplete");
+        torch::NoGradGuard no_grad;
+        for (auto& target : targets)
+        {
+            if (std::find(report.reinitialized_keys.begin(),
+                          report.reinitialized_keys.end(), target.first) !=
+                report.reinitialized_keys.end())
+                continue;
+            const auto found = source.find(target.first);
+            TORCH_CHECK(found != source.end(),
+                        "transfer mapping changed between inspection and copy");
+            target.second->copy_(found->second);
+        }
         return report;
     }
 

@@ -1739,6 +1739,16 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
                             "setnormaltracejunction",
                             &FastMatch::setnormaltracejunction);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setformfitenabled", &FastMatch::setformfitenabled);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setformfitdenseparams",
+                            &FastMatch::setformfitdenseparams);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setformfitannparams",
+                            &FastMatch::setformfitannparams);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "setformfitbudget", &FastMatch::setformfitbudget);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformcenter", &FastMatch::settransformcenter);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "settransformextent", &FastMatch::settransformextent);
@@ -2122,6 +2132,26 @@ void CxParserRuntime::ParserInitialClassFunction(int iusing) {
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getnormaltracepaircount",
                             &FastMatch::getnormaltracepaircount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitstatuscode",
+                            &FastMatch::getformfitstatuscode);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitreferencecount",
+                            &FastMatch::getformfitreferencecount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitobservedcount",
+                            &FastMatch::getformfitobservedcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitmutualcount",
+                            &FastMatch::getformfitmutualcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitanchorcount",
+                            &FastMatch::getformfitanchorcount);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitscore", &FastMatch::getformfitscore);
+    m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
+                            "getformfitresidual",
+                            &FastMatch::getformfitresidual);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,
                             "getmaxresult", &FastMatch::getmaxresult);
     m_parser.DefineClassFun(fastmatch_type_name.data(), pfastmatch,

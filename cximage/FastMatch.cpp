@@ -25,6 +25,14 @@
 namespace {
 struct NormalTraceCandidate {
   cv::Point point;
+  // Integer coordinates are retained only for topology/binning.  The original
+  // FindLine conclusion is the measurement and must remain sub-pixel for the
+  // learned model and its normal A/B pair.
+  cv::Point2f source_point;
+  // Estimated only from neighbouring selected FindLine conclusions.  ANN
+  // and Dijkstra use this value-preserving local slope; image gradients are
+  // never allowed to create or redirect a topology node.
+  cv::Point2f tangent;
   cv::Point2f normal;
   int source_scan_index = -1;
   int domain_polarity = 0;
@@ -80,6 +88,7 @@ struct NormalTraceKeyPoint {
 
 struct NormalTraceSourceConclusion {
   cv::Point point;
+  cv::Point2f source_point;
   cv::Point2f domain_normal;
   int direction = -1;
   int scan_index = -1;
@@ -125,6 +134,8 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
   for (int direction = 0; direction < 4; ++direction) {
     const FastMatch::DirectionalProbeEvidence &side =
         source.getdirectionalprobeevidence(direction);
+    cv::Point2f canonicalScanNormal;
+    bool canonicalScanNormalValid = false;
     for (std::size_t i = 0; i < side.selected_point_by_scan.size() &&
                             i < side.selected_point_valid_by_scan.size();
          ++i) {
@@ -145,6 +156,16 @@ std::array<std::vector<NormalTraceAnchorFrame>, 4> CollectNormalTraceAnchors(
         const float length = std::sqrt(frame.scan_normal.dot(frame.scan_normal));
         if (length > 1e-6f) {
           frame.scan_normal *= 1.0f / length;
+          // Some FindLine scan collections expose a geometrically identical
+          // line with reversed p0/p1 ordering.  That ordering is not edge
+          // polarity. Canonicalise the scan axis inside one physical domain,
+          // then apply the saved FindLine method polarity below.
+          if (!canonicalScanNormalValid) {
+            canonicalScanNormal = frame.scan_normal;
+            canonicalScanNormalValid = true;
+          } else if (frame.scan_normal.dot(canonicalScanNormal) < 0.0f) {
+            frame.scan_normal *= -1.0f;
+          }
           frame.scan_normal_valid = true;
         }
       }
@@ -209,11 +230,13 @@ bool BuildCompressedNormalTraceDomains(
         continue;
       }
       NormalTraceKeyPoint key;
+      key.candidate.source_point = anchor.point;
       key.candidate.point =
           cv::Point(static_cast<int>(std::lround(anchor.point.x)),
                     static_cast<int>(std::lround(anchor.point.y)));
       key.candidate.normal =
           anchor.scan_normal * static_cast<float>(anchor.domain_polarity);
+      key.candidate.tangent = anchor.tangent;
       key.candidate.source_scan_index = anchor.scan_index;
       key.candidate.domain_polarity = anchor.domain_polarity;
       key.direction = direction;
@@ -409,8 +432,15 @@ bool TraceCompressedNormalTraceDomain(
           (1.0f / gap);
       const cv::Point2f currentNormal = nodes[current].candidate.normal;
       const cv::Point2f nextNormal = nodes[next].candidate.normal;
-      const cv::Point2f currentTangent(-currentNormal.y, currentNormal.x);
-      const cv::Point2f nextTangent(-nextNormal.y, nextNormal.x);
+      // The line-body direction comes from adjacent accepted FindLine
+      // conclusions, not from Sobel and not merely from a perpendicular of a
+      // possibly reversed Gauge scan segment.
+      cv::Point2f currentTangent = nodes[current].candidate.tangent;
+      cv::Point2f nextTangent = nodes[next].candidate.tangent;
+      if (currentTangent.dot(currentTangent) <= 1e-6f)
+        currentTangent = cv::Point2f(-currentNormal.y, currentNormal.x);
+      if (nextTangent.dot(nextTangent) <= 1e-6f)
+        nextTangent = cv::Point2f(-nextNormal.y, nextNormal.x);
       const float currentTangentAlignment =
           std::abs(currentTangent.dot(edgeDirection));
       const float nextTangentAlignment =
@@ -627,7 +657,10 @@ bool TraceCompressedNormalTraceDomain(
           -1.0f, 1.0f);
       const cv::Point2f currentNormal =
           nodes[static_cast<std::size_t>(current)].candidate.normal;
-      const cv::Point2f currentTangent(-currentNormal.y, currentNormal.x);
+      cv::Point2f currentTangent =
+          nodes[static_cast<std::size_t>(current)].candidate.tangent;
+      if (currentTangent.dot(currentTangent) <= 1e-6f)
+        currentTangent = cv::Point2f(-currentNormal.y, currentNormal.x);
       const cv::Point2f edgeDirection =
           (nodes[static_cast<std::size_t>(next)].candidate.point -
            nodes[static_cast<std::size_t>(current)].candidate.point) *
@@ -714,8 +747,16 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   int availableSides = 0;
   const std::array<std::vector<NormalTraceAnchorFrame>, 4> anchors =
         CollectNormalTraceAnchors(source, availableSides);
-  for (const auto &directionAnchors : anchors)
+  for (std::size_t direction = 0; direction < anchors.size(); ++direction) {
+    const auto &directionAnchors = anchors[direction];
     raw_count += static_cast<int>(directionAnchors.size());
+    evidence.anchor_points_by_direction[direction].reserve(
+        directionAnchors.size());
+    for (const NormalTraceAnchorFrame &anchor : directionAnchors) {
+      evidence.anchor_points_by_direction[direction].push_back(
+          {anchor.point.x, anchor.point.y});
+    }
+  }
   evidence.directional_side_count = availableSides;
   if (availableSides != 4) {
     evidence.reason = "DIRECTIONAL_SELECTED_ANCHORS_INSUFFICIENT";
@@ -725,6 +766,31 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   BuildCompressedNormalTraceDomains(anchors, centerX, centerY, cosAngle,
                                     sinAngle, cfg, keypoints, evidence);
   deduplicated_count = static_cast<int>(evidence.domain_points.size());
+  // Sparse directional evidence is a quality gate, not an invitation to add
+  // image-derived or cross-domain points.  Stop before ANN/Dijkstra whenever
+  // one physical side cannot supply the operator-controlled minimum number of
+  // valid source conclusions.  The compatibility template remains available
+  // to the caller as an explicit fallback.
+  bool domainGateFailed = false;
+  std::string selectedCounts;
+  std::string validCounts;
+  for (int direction = 0; direction < 4; ++direction) {
+    if (!selectedCounts.empty()) {
+      selectedCounts += ",";
+      validCounts += ",";
+    }
+    selectedCounts += std::to_string(anchors[direction].size());
+    validCounts += std::to_string(keypoints[direction].size());
+    if (keypoints[direction].size() <
+        static_cast<std::size_t>(cfg.min_keypoints_per_domain))
+      domainGateFailed = true;
+  }
+  if (domainGateFailed) {
+    evidence.reason = "DOMAIN_KEYPOINT_GATE_FAILED_selected=" +
+                      selectedCounts + "_valid=" + validCounts + "_min=" +
+                      std::to_string(cfg.min_keypoints_per_domain);
+    return false;
+  }
   if (deduplicated_count < 4) {
     evidence.reason = "DEDUPLICATED_DOMAIN_TOO_SMALL";
     return false;
@@ -1102,7 +1168,7 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
       if (!conclusionPath.empty() && conclusionPath.back().point == point)
         continue;
       conclusionPath.push_back(
-          {point, found->candidate.normal, direction,
+          {point, found->candidate.source_point, found->candidate.normal, direction,
            found->candidate.source_scan_index});
     }
   }
@@ -1113,8 +1179,8 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
   evidence.dijkstra_trace_points.reserve(conclusionPath.size());
   for (const NormalTraceSourceConclusion &sourceConclusion : conclusionPath) {
     evidence.dijkstra_trace_points.push_back(
-        {static_cast<double>(sourceConclusion.point.x),
-         static_cast<double>(sourceConclusion.point.y)});
+        {static_cast<double>(sourceConclusion.source_point.x),
+         static_cast<double>(sourceConclusion.source_point.y)});
     evidence.dijkstra_source_directions.push_back(
         sourceConclusion.direction);
     evidence.dijkstra_source_scans.push_back(sourceConclusion.scan_index);
@@ -1155,6 +1221,22 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     if (length > 1e-6f)
       tangent *= 1.0f / length;
     return tangent;
+  };
+  const auto endpointTurnDegrees = [](const std::vector<cv::Point> &points) {
+    if (points.size() < 3)
+      return 0.0;
+    const cv::Point2f firstDelta = points[1] - points[0];
+    const cv::Point2f lastDelta =
+        points.back() - points[points.size() - 2];
+    const double firstLength = std::sqrt(firstDelta.dot(firstDelta));
+    const double lastLength = std::sqrt(lastDelta.dot(lastDelta));
+    if (firstLength <= 1e-6 || lastLength <= 1e-6)
+      return 0.0;
+    const double cosine = std::clamp(
+        static_cast<double>(firstDelta.dot(lastDelta)) /
+            (firstLength * lastLength),
+        -1.0, 1.0);
+    return std::acos(cosine) * 180.0 / CV_PI;
   };
   const auto endpointWindow = [&cfg](const std::vector<cv::Point> &points,
                                      bool atEnd) {
@@ -1229,10 +1311,14 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
 
     const cv::Point2f from = currentPoints.back();
     const cv::Point2f to = nextPoints.front();
-    const cv::Point2f fromTangent =
-        endpointTangent(endpointWindow(currentPoints, true));
-    const cv::Point2f toTangent =
-        endpointTangent(endpointWindow(nextPoints, false));
+    const std::vector<cv::Point> currentWindow =
+        endpointWindow(currentPoints, true);
+    const std::vector<cv::Point> nextWindow =
+        endpointWindow(nextPoints, false);
+    const cv::Point2f fromTangent = endpointTangent(currentWindow);
+    const cv::Point2f toTangent = endpointTangent(nextWindow);
+    const double currentEndpointTurn = endpointTurnDegrees(currentWindow);
+    const double nextEndpointTurn = endpointTurnDegrees(nextWindow);
     const float denominator = cross2d(fromTangent, toTangent);
     const double crossAngleDeg =
         std::asin(std::clamp(std::abs(static_cast<double>(denominator)),
@@ -1264,10 +1350,17 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
           junction.x <= roi.x + roi.width + maximumExtrapolation &&
           junction.y <= roi.y + roi.height + maximumExtrapolation;
     }
+    // A sharp tangent intersection is valid only when both incoming tracks
+    // are locally line-like. Curved domains can also have a large cross angle,
+    // but snapping them to the tangent intersection creates a false corner.
+    const double maximumLineLikeTurn = std::max(
+        3.0, static_cast<double>(cfg.junction_min_cross_angle_deg) * 0.5);
     const bool useIntersection =
         validIntersection &&
         crossAngleDeg >=
-            static_cast<double>(cfg.junction_min_cross_angle_deg);
+            static_cast<double>(cfg.junction_min_cross_angle_deg) &&
+        currentEndpointTurn <= maximumLineLikeTurn &&
+        nextEndpointTurn <= maximumLineLikeTurn;
     if (useIntersection) {
       const cv::Point rounded(static_cast<int>(std::lround(junction.x)),
                               static_cast<int>(std::lround(junction.y)));
@@ -1277,6 +1370,9 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     } else {
       if (validIntersection) {
         appendIntersectionGuidedBlend(from, junction, to);
+        // Publish the point actually lying on the smooth derived curve, not
+        // the off-curve tangent intersection used as its Bezier control.
+        junction = from * 0.25f + junction * 0.5f + to * 0.25f;
       } else {
         appendTangentBlend(from, to, fromTangent, toTangent, allowedGap);
         junction = (from + to) * 0.5f;
@@ -1327,6 +1423,7 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     const NormalTraceSourceConclusion &sourceConclusion =
         conclusionPath[static_cast<size_t>(i)];
     const cv::Point &p = sourceConclusion.point;
+    const cv::Point2f &sourcePoint = sourceConclusion.source_point;
     bool nearCorner = false;
     for (const cv::Point2f &corner : cornerCenters) {
       if (cfg.corner_rejection_radius_px <= 0)
@@ -1384,31 +1481,36 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
       ++evidence.normal_pair_binding_miss_count;
       continue;
     }
-    if (std::abs(domainNormal.dot(tangent)) > angular_limit) {
+    cv::Point2f normal(-tangent.y, tangent.x);
+    const float domainAlignment = normal.dot(domainNormal);
+    // The adjacent source conclusions own the geometric normal. The saved
+    // FindLine domain owns only its A/B hemisphere. Requiring both normals to
+    // be almost identical rejects valid curved sides; reject only when the
+    // hemisphere itself is ambiguous.
+    if (std::abs(domainAlignment) < angular_limit) {
       ++evidence.normal_pair_binding_miss_count;
       continue;
     }
-    cv::Point2f normal(-tangent.y, tangent.x);
-    if (normal.dot(domainNormal) < 0.0f)
+    if (domainAlignment < 0.0f)
       normal *= -1.0f;
     const int offset = std::max(1, cfg.normal_pair_offset_px);
-    const cv::Point2f a(static_cast<float>(p.x) + normal.x * offset,
-                        static_cast<float>(p.y) + normal.y * offset);
-    const cv::Point2f b(static_cast<float>(p.x) - normal.x * offset,
-                        static_cast<float>(p.y) - normal.y * offset);
+    const cv::Point2f a(sourcePoint.x + normal.x * offset,
+                        sourcePoint.y + normal.y * offset);
+    const cv::Point2f b(sourcePoint.x - normal.x * offset,
+                        sourcePoint.y - normal.y * offset);
     if (a.x < 0 || a.y < 0 || b.x < 0 || b.y < 0 ||
         a.x >= source_mat.cols || b.x >= source_mat.cols ||
         a.y >= source_mat.rows || b.y >= source_mat.rows) continue;
-    Standard_Real ax = static_cast<Standard_Real>(std::lround(a.x));
-    Standard_Real ay = static_cast<Standard_Real>(std::lround(a.y));
-    Standard_Real bx = static_cast<Standard_Real>(std::lround(b.x));
-    Standard_Real by = static_cast<Standard_Real>(std::lround(b.y));
+    Standard_Real ax = static_cast<Standard_Real>(a.x);
+    Standard_Real ay = static_cast<Standard_Real>(a.y);
+    Standard_Real bx = static_cast<Standard_Real>(b.x);
+    Standard_Real by = static_cast<Standard_Real>(b.y);
     out_pattern.addpointa(ax, ay);
     out_pattern.addpointb(bx, by);
     evidence.normal_pair_a.push_back({static_cast<double>(ax), static_cast<double>(ay)});
     evidence.normal_pair_b.push_back({static_cast<double>(bx), static_cast<double>(by)});
     evidence.normal_pair_source_points.push_back(
-        {static_cast<double>(p.x), static_cast<double>(p.y)});
+        {static_cast<double>(sourcePoint.x), static_cast<double>(sourcePoint.y)});
     evidence.normal_pair_source_directions.push_back(boundDirection);
     evidence.normal_pair_source_scans.push_back(boundScan);
     ++evidence.normal_pair_findline_bound_count;
@@ -2510,7 +2612,11 @@ FastMatch::LearnDirectionParams FastMatch::effectiveLearnDirectionParams(
   if (params.hgap < 0)
     params.hgap = hgap();
   if (params.method < 0)
-    params.method = 0;
+    // Opposite physical sides are observed along the same Gauge scan axis,
+    // therefore their exterior transitions have opposite polarity.  This is
+    // the robust untrained default; a learned template can still persist an
+    // independent method for every direction.
+    params.method = (direction == 1 || direction == 3) ? 1 : 0;
   if (params.threshold < 0)
     params.threshold = thre();
   if (params.linegap < 0)
@@ -2621,6 +2727,21 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
   const int roiH = std::max(1, m_learn_roi_h);
   const double centerX = static_cast<double>(roiX) + roiW * 0.5;
   const double centerY = static_cast<double>(roiY) + roiH * 0.5;
+  const double scanRadians = getscanrotation() * CV_PI / 180.0;
+  const double scanCos = std::cos(scanRadians);
+  const double scanSin = std::sin(scanRadians);
+  const auto belongsToPhysicalSide =
+      [centerX, centerY, scanCos, scanSin](
+          int direction, const CxShapePoint& candidate) {
+        const double dx = candidate.x - centerX;
+        const double dy = candidate.y - centerY;
+        const double localU = scanCos * dx + scanSin * dy;
+        const double localV = -scanSin * dx + scanCos * dy;
+        return direction == 0 ? localV <= 0.0
+             : direction == 1 ? localV >= 0.0
+             : direction == 2 ? localU <= 0.0
+                              : localU >= 0.0;
+      };
 
   if (image.getmat().empty()) {
     for (int direction = 0; direction < 4; ++direction) {
@@ -2638,10 +2759,26 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
         m_directional_probe_evidence[static_cast<std::size_t>(direction)];
     evidence.direction = direction;
     evidence.params = effectiveLearnDirectionParams(direction);
-    evidence.scan_type = direction < 2 ? 0 : 1;
+    const bool usesRotatedLineSegment =
+        std::abs(getscanrotation()) > 1.0e-9;
+    // FindLine's ROI builders expose opposite w/h scan-family names:
+    // setrect() uses w for Top/Bottom and h for Left/Right, while
+    // setlinesegment() uses h for Top/Bottom and w for Left/Right.
+    evidence.scan_type = usesRotatedLineSegment
+        ? (direction < 2 ? 1 : 0)
+        : (direction < 2 ? 0 : 1);
 
     FindLine probe;
-    probe.SetWHgap(evidence.params.wgap, evidence.params.hgap);
+    // Preserve the user-facing physical-axis meaning of wgap/hgap across the
+    // two native geometry builders.
+    probe.SetWHgap(
+        usesRotatedLineSegment ? evidence.params.hgap : evidence.params.wgap,
+        usesRotatedLineSegment ? evidence.params.wgap : evidence.params.hgap);
+    // A rotated line-segment probe has opposite native family semantics and
+    // must run only the family for this physical side. Keep the zero-angle
+    // legacy two-family path byte-for-byte compatible for rigid regression.
+    if (usesRotatedLineSegment)
+      probe.setscandirection(evidence.scan_type == 0 ? 1 : 2);
     probe.setcomparegap(evidence.params.compare_gap);
     probe.setthre(evidence.params.threshold);
     probe.setlinegap(evidence.params.linegap);
@@ -2669,7 +2806,18 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
     evidence.runtime_selected_edge = runtimeSelectedEdge;
     probe.setselectedgenum(runtimeSelectedEdge);
     probe.setscanrotation(getscanrotation());
-    probe.setrect(roiX, roiY, roiW, roiH);
+    if (!usesRotatedLineSegment) {
+      // Preserve the exact legacy rigid geometry and sampling at zero angle.
+      probe.setrect(roiX, roiY, roiW, roiH);
+    } else {
+      // FindLine::setrect() is axis-aligned and does not consume the saved
+      // scan rotation. Its line-segment ROI path is the registered rotated
+      // Gauge implementation. A horizontal centreline plus half-height
+      // reconstructs the same box before rotation is applied.
+      probe.setlinesegment(static_cast<double>(roiX), centerY,
+                           static_cast<double>(roiX + roiW), centerY,
+                           static_cast<double>(roiH) * 0.5);
+    }
     probe.Measure(image);
     probe.SmartFilter(-1, -1);
 
@@ -2722,11 +2870,7 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
       std::vector<CxShapePoint> sideCandidates;
       sideCandidates.reserve(candidates.size());
       for (const CxShapePoint& candidate : candidates) {
-        const bool isSelectedSide =
-            direction == 0 ? candidate.y <= centerY :
-            direction == 1 ? candidate.y >= centerY :
-            direction == 2 ? candidate.x <= centerX : candidate.x >= centerX;
-        if (isSelectedSide)
+        if (belongsToPhysicalSide(direction, candidate))
           sideCandidates.push_back(candidate);
       }
       if (sideCandidates.empty())
@@ -2757,11 +2901,7 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
     // accepted point record. Explicit Point Columns never use this fallback.
     if (evidence.accepted_points.empty() && evidence.params.selected_edge == 0) {
       for (const CxShapePoint& point : rawPoints) {
-        const bool isSelectedSide =
-            direction == 0 ? point.y <= centerY :
-            direction == 1 ? point.y >= centerY :
-            direction == 2 ? point.x <= centerX : point.x >= centerX;
-        if (isSelectedSide)
+        if (belongsToPhysicalSide(direction, point))
           evidence.accepted_points.push_back(point);
       }
     }
@@ -2780,6 +2920,10 @@ void FastMatch::runDirectionalFindLineProbes(Image& image) {
     CXLOG_INFO("FastMatch", "directional_findline_probe", evidence.status,
                "direction=" + std::to_string(direction) +
                    " scan_type=" + std::to_string(evidence.scan_type) +
+                   " geometry=" +
+                   std::string(usesRotatedLineSegment
+                                   ? "rotated_line_segment"
+                                   : "rigid_rect") +
                    " scans=" + std::to_string(evidence.scan_line_count) +
                    " raw=" + std::to_string(evidence.raw_result_count) +
                    " accepted=" +
@@ -3058,6 +3202,9 @@ void FastMatch::Learn(Image &image) {
                  m_normal_trace_config.ann_normal_deviation_deg) +
              " xy_bin=" +
              std::to_string(m_normal_trace_config.xy_compression_bin_px) +
+             " min_keypoints_per_domain=" +
+             std::to_string(
+                 m_normal_trace_config.min_keypoints_per_domain) +
              " endpoint_spike_ratio_percent=" +
              std::to_string(
                  m_normal_trace_config.endpoint_spike_ratio_percent) +
@@ -3087,6 +3234,7 @@ void FastMatch::Learn(Image &image) {
       gp_Rectangle learned_rect = FindLine::patternboundingrectAB();
       m_imodelwith = static_cast<int>(learned_rect.Width());
       m_imodelheigh = static_cast<int>(learned_rect.Height());
+      buildReferenceFormFitModel(image);
       CXLOG_INFO("FastMatch", "learn_normal_trace", "complete",
                  "domain=" + std::to_string(m_normal_trace_candidate_count) +
                  " trace=" + std::to_string(m_normal_trace_point_count) +
@@ -4336,6 +4484,190 @@ void FastMatch::setnormaltracejunction(
       std::clamp(join_spacing_multiplier_percent, 100, 2000);
 }
 
+void FastMatch::setformfitenabled(int enabled) {
+  m_formfit_config.enabled = enabled != 0;
+  if (!m_formfit_config.enabled) {
+    m_formfit_result = CxFastMatchFormFitResult{};
+    m_formfit_result.status = "FORM_FIT_DISABLED";
+    m_formfit_result.failure_stage = "disabled";
+  }
+}
+
+void FastMatch::setformfitdenseparams(
+    int dense_step_milli_px, int profile_half_width_milli_px,
+    int profile_step_milli_px, int minimum_gradient,
+    int curvature_threshold_millideg) {
+  m_formfit_config.dense_sample_step_milli_px =
+      std::clamp(dense_step_milli_px, 100, 10000);
+  m_formfit_config.profile_half_width_milli_px =
+      std::clamp(profile_half_width_milli_px, 250, 20000);
+  m_formfit_config.profile_step_milli_px =
+      std::clamp(profile_step_milli_px, 50, 5000);
+  m_formfit_config.profile_min_gradient =
+      std::clamp(minimum_gradient, 0, 255);
+  m_formfit_config.curvature_anchor_threshold_millideg =
+      std::clamp(curvature_threshold_millideg, 100, 180000);
+}
+
+void FastMatch::setformfitannparams(
+    int search_radius_milli_px, int normal_tolerance_deg, int trim_percent,
+    int minimum_mutual_pairs, int maximum_iterations) {
+  m_formfit_config.ann_search_radius_milli_px =
+      std::clamp(search_radius_milli_px, 250, 100000);
+  m_formfit_config.ann_normal_tolerance_deg =
+      std::clamp(normal_tolerance_deg, 1, 90);
+  m_formfit_config.ann_trim_percent = std::clamp(trim_percent, 0, 80);
+  m_formfit_config.minimum_mutual_pairs =
+      std::clamp(minimum_mutual_pairs, 2, 100000);
+  m_formfit_config.maximum_iterations =
+      std::clamp(maximum_iterations, 1, 100);
+}
+
+void FastMatch::setformfitbudget(int maximum_elapsed_ms,
+                                 int maximum_structural_anchors,
+                                 int allow_nonuniform_affine) {
+  m_formfit_config.maximum_elapsed_ms =
+      std::clamp(maximum_elapsed_ms, 1, 60000);
+  m_formfit_config.maximum_structural_anchors =
+      std::clamp(maximum_structural_anchors, 4, 4096);
+  m_formfit_config.allow_nonuniform_affine = allow_nonuniform_affine != 0;
+}
+
+int FastMatch::getformfitstatuscode() {
+  if (!m_formfit_result.executed)
+    return 0;
+  if (m_formfit_result.succeeded)
+    return 1;
+  return m_formfit_result.budget_exceeded ? -2 : -1;
+}
+int FastMatch::getformfitreferencecount() {
+  return static_cast<int>(m_reference_shape_model.dense_points.size());
+}
+int FastMatch::getformfitobservedcount() {
+  return static_cast<int>(m_observed_shape_model.dense_points.size());
+}
+int FastMatch::getformfitmutualcount() {
+  return m_formfit_result.dense_mutual_count;
+}
+int FastMatch::getformfitanchorcount() {
+  return static_cast<int>(m_reference_shape_model.anchors.size());
+}
+double FastMatch::getformfitscore() { return m_formfit_result.score; }
+double FastMatch::getformfitresidual() {
+  return m_formfit_result.symmetric_residual_px;
+}
+
+void FastMatch::buildReferenceFormFitModel(Image& image) {
+  m_reference_shape_model = CxFastMatchShapeModel{};
+  m_observed_shape_model = CxFastMatchShapeModel{};
+  m_formfit_result = CxFastMatchFormFitResult{};
+  m_formfit_gauge = cxcore::formfit::FormfitGauge{};
+  if (!m_formfit_config.enabled)
+    return;
+
+  std::vector<CxFastMatchSourceObservation> sourcePoints;
+  const std::size_t sourceCount = std::min({
+      m_normal_trace_evidence.normal_pair_source_points.size(),
+      m_normal_trace_evidence.normal_pair_a.size(),
+      m_normal_trace_evidence.normal_pair_source_directions.size(),
+      m_normal_trace_evidence.normal_pair_source_scans.size()});
+  sourcePoints.reserve(sourceCount);
+  for (std::size_t index = 0; index < sourceCount; ++index) {
+    const CxShapePoint& source =
+        m_normal_trace_evidence.normal_pair_source_points[index];
+    const CxShapePoint& pointA =
+        m_normal_trace_evidence.normal_pair_a[index];
+    const double dx = pointA.x - source.x;
+    const double dy = pointA.y - source.y;
+    const double length = std::hypot(dx, dy);
+    if (length <= 1e-9)
+      continue;
+    CxFastMatchSourceObservation observation;
+    observation.x = source.x;
+    observation.y = source.y;
+    observation.normal_x = dx / length;
+    observation.normal_y = dy / length;
+    // The vector points toward the FindLine-selected A domain, so polarity is
+    // inherited rather than recomputed from image gradient sign.
+    observation.polarity = 1;
+    observation.source_direction =
+        m_normal_trace_evidence.normal_pair_source_directions[index];
+    observation.source_scan =
+        m_normal_trace_evidence.normal_pair_source_scans[index];
+    sourcePoints.push_back(observation);
+  }
+  std::vector<cv::Point2d> trace;
+  trace.reserve(m_normal_trace_evidence.derived_trace_points.size());
+  for (const CxShapePoint& point :
+       m_normal_trace_evidence.derived_trace_points)
+    trace.emplace_back(point.x, point.y);
+  std::vector<cv::Point2d> junctions;
+  junctions.reserve(m_normal_trace_evidence.derived_junction_points.size());
+  for (const CxShapePoint& point :
+       m_normal_trace_evidence.derived_junction_points)
+    junctions.emplace_back(point.x, point.y);
+
+  m_reference_shape_model = BuildFastMatchReferenceShapeModel(
+      sourcePoints, trace, junctions, image.getmat(), m_formfit_config,
+      "fastmatch_reference_shape");
+  if (!m_reference_shape_model.available) {
+    m_formfit_result.executed = true;
+    m_formfit_result.status = "FORM_FIT_MODEL_UNAVAILABLE";
+    m_formfit_result.failure_stage = "reference_shape_model_build";
+    refreshFormFitGauge();
+    return;
+  }
+
+  // Learn produces an auditable self-observation.  A later transformmatch
+  // replaces it with the real observed image model.
+  FastMatchTransform identity;
+  identity.cx = m_reference_shape_model.centroid_x;
+  identity.cy = m_reference_shape_model.centroid_y;
+  identity.half_u = std::max(1.0, m_reference_shape_model.bbox_width * 0.5);
+  identity.half_v = std::max(1.0, m_reference_shape_model.bbox_height * 0.5);
+  runFormFitOnImage(image, identity, "fastmatch_learn_self_observation");
+}
+
+void FastMatch::runFormFitOnImage(Image& image,
+                                  const FastMatchTransform& seed,
+                                  const char* observedModelId) {
+  if (!m_formfit_config.enabled)
+    return;
+  if (!m_reference_shape_model.available) {
+    m_formfit_result = CxFastMatchFormFitResult{};
+    m_formfit_result.executed = true;
+    m_formfit_result.status = "FORM_FIT_MODEL_UNAVAILABLE";
+    m_formfit_result.failure_stage = "reference_shape_model_unavailable";
+    refreshFormFitGauge();
+    return;
+  }
+  m_observed_shape_model = BuildFastMatchObservedShapeModel(
+      m_reference_shape_model, image.getmat(), seed, m_formfit_config,
+      observedModelId ? observedModelId : "fastmatch_observed_shape");
+  m_formfit_result = RunFastMatchBidirectionalFormFit(
+      m_reference_shape_model, m_observed_shape_model, seed,
+      m_formfit_config);
+  refreshFormFitGauge();
+  CXLOG_INFO("FastMatch", "form_fit", m_formfit_result.status,
+             "reference_dense=" +
+                 std::to_string(m_formfit_result.reference_dense_count) +
+                 " observed_dense=" +
+                 std::to_string(m_formfit_result.observed_dense_count) +
+                 " mutual=" +
+                 std::to_string(m_formfit_result.dense_mutual_count) +
+                 " residual_px=" +
+                 std::to_string(m_formfit_result.symmetric_residual_px) +
+                 " score=" + std::to_string(m_formfit_result.score) +
+                 " elapsed_ms=" +
+                 std::to_string(m_formfit_result.elapsed_ms));
+}
+
+void FastMatch::refreshFormFitGauge() {
+  m_formfit_gauge = cxcore::formfit::MakeFastMatchFormFitGauge(
+      m_formfit_result, m_reference_shape_model, m_observed_shape_model,
+      "fastmatch_form_fit_gauge", "FastMatch Form Fit Gauge");
+}
+
 void FastMatch::settransformsearchenabled(int enabled) {
   m_transform_search_config.enabled = enabled != 0;
 }
@@ -4919,6 +5251,9 @@ void FastMatch::transformmatch(void* pimage) {
     return;
   }
   runTransformSearch(*image);
+  if (m_transform_search_result.converged)
+    runFormFitOnImage(*image, m_transform_search_result.best,
+                      "fastmatch_transform_observation");
 }
 void FastMatch::MatchABMore(Image &image) {
   m_matchimage = &image;

@@ -1131,6 +1131,24 @@ bool CaptureFastMatchResult(
         normal_trace.derived_junction_current_extrapolation_px;
     normal_trace_capture.derived_junction_next_extrapolation_px =
         normal_trace.derived_junction_next_extrapolation_px;
+    const auto copy_direction_points = [](
+        const std::array<std::vector<CxShapePoint>, 4>& source,
+        std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>& target) {
+        for (std::size_t direction = 0; direction < source.size(); ++direction) {
+            target[direction].clear();
+            target[direction].reserve(source[direction].size());
+            for (const CxShapePoint& point : source[direction])
+                target[direction].push_back({point.x, point.y});
+        }
+    };
+    copy_direction_points(normal_trace.anchor_points_by_direction,
+                          normal_trace_capture.anchor_points_by_direction);
+    copy_direction_points(normal_trace.domain_points_by_direction,
+                          normal_trace_capture.domain_points_by_direction);
+    copy_direction_points(normal_trace.compressed_points_by_direction,
+                          normal_trace_capture.compressed_points_by_direction);
+    copy_direction_points(normal_trace.ann_selected_points_by_direction,
+                          normal_trace_capture.ann_selected_points_by_direction);
     const auto copy_normal_trace_points = [](const auto& source, auto& target) {
         target.clear();
         target.reserve(source.size());
@@ -1164,6 +1182,13 @@ bool CaptureFastMatchResult(
     normal_trace_capture.normal_pair_source_scans =
         normal_trace.normal_pair_source_scans;
     if (normal_trace.executed)
+        output.algorithm_executed = true;
+
+    output.fastmatch_reference_shape_model = tool.getreferenceshapemodel();
+    output.fastmatch_observed_shape_model = tool.getobservedshapemodel();
+    output.fastmatch_form_fit = tool.getformfitresult();
+    output.fastmatch_form_fit_gauge = tool.getformfitgauge();
+    if (output.fastmatch_form_fit.executed)
         output.algorithm_executed = true;
 
     const FastMatchTransformSearchResult& transform_search =
@@ -1679,6 +1704,16 @@ static void MergeToolCapture(
 
     if (tool.fastmatch_normal_trace.executed)
         capture.fastmatch_normal_trace = tool.fastmatch_normal_trace;
+    if (tool.fastmatch_reference_shape_model.available)
+        capture.fastmatch_reference_shape_model =
+            tool.fastmatch_reference_shape_model;
+    if (tool.fastmatch_observed_shape_model.available)
+        capture.fastmatch_observed_shape_model =
+            tool.fastmatch_observed_shape_model;
+    if (tool.fastmatch_form_fit.executed)
+        capture.fastmatch_form_fit = tool.fastmatch_form_fit;
+    if (!tool.fastmatch_form_fit_gauge.elements.empty())
+        capture.fastmatch_form_fit_gauge = tool.fastmatch_form_fit_gauge;
 
     if (tool.fastmatch_template_geometry.available)
         capture.fastmatch_template_geometry =

@@ -2173,6 +2173,94 @@ static std::string BuildManualReviewParamSummaryLocal(
     appendInt(oss, summaryText, "roi_y", "roi_y", missing);
     appendInt(oss, summaryText, "roi_width", "roi_width", missing);
     appendInt(oss, summaryText, "roi_height", "roi_height", missing);
+  } else if (normalizedTool == "FastMatch") {
+    // A headless result_summary owns the exact inputs that produced its
+    // evidence.  Restore those inputs when the case is selected; falling back
+    // to SeedDefaultManualGlobals() changes the learn ROI and makes a replay
+    // diagnose a different image region.  Keep this list schema-based so case
+    // discovery remains entirely asset driven.
+    const std::pair<const char *, const char *> fastMatchGlobals[] = {
+        {"global_learn_roi_x", "learn_roi_x"},
+        {"global_learn_roi_y", "learn_roi_y"},
+        {"global_learn_roi_w", "learn_roi_w"},
+        {"global_learn_roi_h", "learn_roi_h"},
+        {"global_search_roi_x", "search_roi_x"},
+        {"global_search_roi_y", "search_roi_y"},
+        {"global_search_roi_w", "search_roi_w"},
+        {"global_search_roi_h", "search_roi_h"},
+        {"global_threshold", "threshold"},
+        {"global_method", "method"},
+        {"global_wgap", "wgap"},
+        {"global_hgap", "hgap"},
+        {"global_linegap", "linegap"},
+        {"global_compare_gap", "compare_gap"},
+        {"global_objfilter", "objfilter"},
+        {"global_find_num", "find_num"},
+        {"global_fastmatch_action", "fastmatch_action"},
+        {"global_fastmatch_scan_rotation_deg",
+         "fastmatch_scan_rotation_deg"},
+        {"global_fastmatch_learn_shared", "fastmatch_learn_shared"},
+        {"global_fastmatch_normaltrace_enabled",
+         "fastmatch_normaltrace_enabled"},
+        {"global_fastmatch_normaltrace_overlap_radius_px",
+         "fastmatch_normaltrace_overlap_radius_px"},
+        {"global_fastmatch_normaltrace_xy_compression_bin_px",
+         "fastmatch_normaltrace_xy_compression_bin_px"},
+        {"global_fastmatch_normaltrace_knn_neighbors",
+         "fastmatch_normaltrace_knn_neighbors"},
+        {"global_fastmatch_normaltrace_ann_radius_px",
+         "fastmatch_normaltrace_ann_radius_px"},
+        {"global_fastmatch_normaltrace_ann_min_component_points",
+         "fastmatch_normaltrace_ann_min_component_points"},
+        {"global_fastmatch_normaltrace_ann_min_component_coverage_percent",
+         "fastmatch_normaltrace_ann_min_component_coverage_percent"},
+        {"global_fastmatch_normaltrace_pair_offset_px",
+         "fastmatch_normaltrace_pair_offset_px"},
+        {"global_fastmatch_normaltrace_min_keypoints_per_domain",
+         "fastmatch_normaltrace_min_keypoints_per_domain"},
+        {"global_fastmatch_normaltrace_min_length_px",
+         "fastmatch_normaltrace_min_length_px"},
+        {"global_fastmatch_normaltrace_min_gradient",
+         "fastmatch_normaltrace_min_gradient"},
+        {"global_fastmatch_normaltrace_max_nodes",
+         "fastmatch_normaltrace_max_nodes"},
+        {"global_fastmatch_normaltrace_max_trace_gap_px",
+         "fastmatch_normaltrace_max_trace_gap_px"},
+        {"global_fastmatch_normaltrace_anchor_radius_px",
+         "fastmatch_normaltrace_anchor_radius_px"},
+        {"global_fastmatch_normaltrace_ann_tangent_deviation_deg",
+         "fastmatch_normaltrace_ann_tangent_deviation_deg"},
+        {"global_fastmatch_normaltrace_ann_normal_deviation_deg",
+         "fastmatch_normaltrace_ann_normal_deviation_deg"},
+        {"global_fastmatch_normaltrace_polarity",
+         "fastmatch_normaltrace_polarity"}};
+    for (const auto &entry : fastMatchGlobals)
+      appendInt(oss, summaryText, entry.first, entry.second, missing);
+
+    for (int direction = 0; direction < 4; ++direction) {
+      const std::string suffix = std::to_string(direction);
+      const std::pair<std::string, std::string> directionalGlobals[] = {
+          {"global_fastmatch_learn_threshold_" + suffix,
+           "fastmatch_learn_threshold_" + suffix},
+          {"global_fastmatch_learn_method_" + suffix,
+           "fastmatch_learn_method_" + suffix},
+          {"global_fastmatch_learn_wgap_" + suffix,
+           "fastmatch_learn_wgap_" + suffix},
+          {"global_fastmatch_learn_hgap_" + suffix,
+           "fastmatch_learn_hgap_" + suffix},
+          {"global_fastmatch_learn_linegap_" + suffix,
+           "fastmatch_learn_linegap_" + suffix},
+          {"global_fastmatch_learn_compare_gap_" + suffix,
+           "fastmatch_learn_compare_gap_" + suffix},
+          {"global_fastmatch_learn_objfilter_" + suffix,
+           "fastmatch_learn_objfilter_" + suffix},
+          {"global_fastmatch_learn_edge_count_" + suffix,
+           "fastmatch_learn_edge_count_" + suffix},
+          {"global_fastmatch_learn_selected_edge_" + suffix,
+           "fastmatch_learn_selected_edge_" + suffix}};
+      for (const auto &entry : directionalGlobals)
+        appendInt(oss, summaryText, entry.first, entry.second, missing);
+    }
   }
 
   appendInt(oss, summaryText, "effective_gap", "gap", missing);
@@ -3271,7 +3359,8 @@ WriteEvidenceChainLoadedElementsDebugLocal(const ManualTestContext &context) {
   rows << "group_label\tcase_id\timage_id\ttarget_id\ttool\tcandidate_id\t"
        << "status\toverride\tdisplay_major\tdisplay_priority\tis_candidate\t"
        << "has_saved_state\tscript_id\tscript_path\timage_path\t"
-       << "thumbnail_path\tdataset_images\tannotations\treason\n";
+       << "thumbnail_path\tdataset_images\tannotations\tparameter_summary\t"
+       << "reason\n";
 
   for (const auto &group : context.script_evidence_groups) {
     for (const auto &thumb : group.thumbs) {
@@ -3303,7 +3392,8 @@ WriteEvidenceChainLoadedElementsDebugLocal(const ManualTestContext &context) {
            << '\t' << escapeTsv(thumb.image_path) << '\t'
            << escapeTsv(thumb.thumbnail_path) << '\t'
            << thumb.dataset_images.size() << '\t' << thumb.annotations.size()
-           << '\t' << escapeTsv(thumb.reason) << '\n';
+           << '\t' << escapeTsv(thumb.parameter_summary) << '\t'
+           << escapeTsv(thumb.reason) << '\n';
     }
   }
 
@@ -4725,6 +4815,223 @@ static int AppendAssetDrivenEvidenceCasesLocal(
   return accepted;
 }
 
+// Headless tool executions are also Evidence cases.  They deliberately do
+// not depend on a hand-maintained case list: a directory becomes visible only
+// when its runtime output contains the normal FastMatch evidence assets below.
+// This keeps the immutable input image separate from its review overlay while
+// making an actual run discoverable in Manual Review / Evidence.
+static std::string ReadSnapshotValueLocal(const std::filesystem::path &path,
+                                          const char *key) {
+  std::string text;
+  if (!ReadTextFile(path.string(), text))
+    return {};
+  const std::string prefix = std::string(key) + ":";
+  std::istringstream lines(text);
+  std::string line;
+  while (std::getline(lines, line)) {
+    line = TrimLine(line);
+    if (line.rfind(prefix, 0) == 0)
+      return TrimLine(line.substr(prefix.size()));
+  }
+  return {};
+}
+
+static int AppendFastMatchHeadlessEvidenceCasesLocal(
+    ManualTestContext &context,
+    const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
+    std::string &reason) {
+  const std::filesystem::path runRoot = ResolveCxVisionRunPath("cxscript_runs");
+  const std::filesystem::path headlessRoot = runRoot / "headless";
+  int discovered = 0;
+  int accepted = 0;
+  std::vector<AssetCaseScanRejectionLocal> rejected;
+  std::set<std::string> identities;
+  std::error_code ec;
+
+  auto reject = [&](const std::filesystem::path &path,
+                    const std::string &message) {
+    rejected.push_back({path.string(), message});
+  };
+  auto regularAsset = [&](const std::filesystem::path &caseDirectory,
+                          const char *name) -> bool {
+    const std::filesystem::path path = caseDirectory / name;
+    std::error_code assetError;
+    return IsAssetCasePathWithinRootLocal(runRoot, path) &&
+           std::filesystem::is_regular_file(path, assetError) &&
+           !std::filesystem::is_symlink(path, assetError);
+  };
+
+  if (!std::filesystem::is_directory(headlessRoot, ec)) {
+    reject(headlessRoot, "headless execution root is missing or inaccessible");
+  } else {
+    std::filesystem::recursive_directory_iterator iterator(
+        headlessRoot, std::filesystem::directory_options::skip_permission_denied,
+        ec);
+    const std::filesystem::recursive_directory_iterator end;
+    while (iterator != end) {
+      if (ec) {
+        reject(headlessRoot, "directory iteration failed: " + ec.message());
+        ec.clear();
+        iterator.increment(ec);
+        continue;
+      }
+
+      const std::filesystem::directory_entry entry = *iterator;
+      std::error_code entryError;
+      if (entry.is_symlink(entryError)) {
+        if (entry.is_directory(entryError))
+          iterator.disable_recursion_pending();
+        iterator.increment(ec);
+        continue;
+      }
+      if (!entry.is_regular_file(entryError) ||
+          entry.path().filename() != "line_trace.json") {
+        iterator.increment(ec);
+        continue;
+      }
+
+      ++discovered;
+      const std::filesystem::path caseDirectory = entry.path().parent_path();
+      const std::filesystem::path provenancePath =
+          caseDirectory / "algorithm_provenance.json";
+      std::string provenance;
+      if (!regularAsset(caseDirectory, "result_summary.json") ||
+          !regularAsset(caseDirectory, "snapshot.txt") ||
+          !regularAsset(caseDirectory, "evidence_overlay.png") ||
+          !regularAsset(caseDirectory, "algorithm_provenance.json") ||
+          !ReadTextFile(provenancePath.string(), provenance) ||
+          NormalizeEvidenceToolTypeLocal(
+              ReadJsonStringFieldLocal(provenance, "tool")) != "FastMatch") {
+        reject(caseDirectory,
+               "ASSET_MISSING or not a FastMatch headless evidence directory");
+        iterator.increment(ec);
+        continue;
+      }
+
+      const std::string imagePath =
+          ReadSnapshotValueLocal(caseDirectory / "snapshot.txt", "image");
+      const std::string scriptPath =
+          ReadSnapshotValueLocal(caseDirectory / "snapshot.txt", "script");
+      std::string reviewItem =
+          ReadSnapshotValueLocal(caseDirectory / "snapshot.txt", "case_id");
+      std::error_code relativeError;
+      const std::filesystem::path relativeCase =
+          std::filesystem::relative(caseDirectory, runRoot, relativeError);
+      if (reviewItem.empty() && !relativeError)
+        reviewItem = relativeCase.generic_string();
+      const std::filesystem::path sourceImage = ResolveWorkspaceFile(imagePath);
+      if (imagePath.empty() || scriptPath.empty() || reviewItem.empty() ||
+          !std::filesystem::is_regular_file(sourceImage, entryError)) {
+        reject(caseDirectory,
+               "ASSET_MISSING: snapshot lacks a resolvable immutable input image, script, or display name");
+        iterator.increment(ec);
+        continue;
+      }
+
+      const std::string normalizedDirectory =
+          std::filesystem::weakly_canonical(caseDirectory, entryError)
+              .generic_string();
+      const std::string runId = caseDirectory.parent_path().filename().string();
+      const std::string internalCaseId =
+          "headless_fastmatch:" + normalizedDirectory;
+      if (!identities.insert(runId + "|" + internalCaseId).second) {
+        reject(caseDirectory, "duplicate internal_case_id within RUN_ID");
+        iterator.increment(ec);
+        continue;
+      }
+
+      ScriptEvidenceThumb thumb;
+      thumb.case_id = internalCaseId;
+      thumb.review_item = reviewItem;
+      thumb.script_id = reviewItem;
+      thumb.script_path = scriptPath;
+      thumb.source_evidence_script_path = scriptPath;
+      thumb.image_id = sourceImage.stem().string();
+      thumb.image_path = sourceImage.string();
+      thumb.thumbnail_path = (caseDirectory / "evidence_overlay.png").string();
+      thumb.target_id = "FastMatch Normal Trace";
+      thumb.tool = "FastMatch";
+      const std::filesystem::path resultSummaryPath =
+          caseDirectory / "result_summary.json";
+      std::string resultSummaryText;
+      ReadTextFile(resultSummaryPath.string(), resultSummaryText);
+      std::string failureClass =
+          ReadJsonStringFieldLocal(resultSummaryText, "failure_stage");
+      if (failureClass.empty())
+        failureClass =
+            ReadJsonStringFieldLocal(resultSummaryText, "failure_class");
+      thumb.parameter_summary = BuildManualReviewParamSummaryLocal(
+          thumb.tool, failureClass, resultSummaryPath.string(),
+          "line_trace=" + (caseDirectory / "line_trace.json").string());
+      thumb.evidence_output_root = caseDirectory.string();
+      thumb.contract_id = "cxvision.headless_fastmatch_evidence.v1";
+      thumb.expected_result = "runtime evidence; human analysis required";
+      thumb.expected_policy_guard =
+          "source image is immutable; overlays are review-only";
+      thumb.evidence_level = "T3";
+      thumb.evidence_case_role = "headless_fastmatch_execution";
+      thumb.source_case_id = internalCaseId;
+      thumb.manual_review_required = true;
+      thumb.promotion_candidate = false;
+      // A completed runtime trace is a diagnostic review asset, not an
+      // unclassified business case.  Keep it in a dedicated, asset-derived
+      // navigation bucket so a human can reach its line_trace evidence without
+      // opening the entire generic To Verify backlog.
+      thumb.evidence_category_override = "FastMatch Trace Diagnostics";
+      thumb.evidence_head_folder = runId;
+      thumb.evidence_case_folder = reviewItem;
+      thumb.workflow_id = runId;
+      thumb.workflow_stage = "headless_fastmatch_review";
+      thumb.workflow_status = "PENDING_HUMAN_REVIEW";
+      thumb.dataset_role = "test";
+      thumb.annotation_policy = "runtime_trace";
+      thumb.gate_policy = "human_review_required";
+      thumb.dataset_frozen = true;
+      thumb.status = "headless_execution_available";
+      thumb.reason = "asset-driven FastMatch headless evidence; output=" +
+                     caseDirectory.string();
+
+      CxEvidenceDatasetImageBinding image;
+      image.image_id = thumb.image_id;
+      image.image_path = thumb.image_path;
+      image.split = "test";
+      image.label = "FastMatch";
+      image.source = "headless_snapshot_immutable_input";
+      thumb.dataset_images.push_back(std::move(image));
+
+      findGroup("FastMatch / Headless Evidence").thumbs.push_back(thumb);
+      ++accepted;
+      iterator.increment(ec);
+    }
+  }
+
+  const std::filesystem::path debugPath =
+      runRoot / "evidence_chain" / "fastmatch_headless_case_scan_debug.json";
+  std::error_code debugError;
+  std::filesystem::create_directories(debugPath.parent_path(), debugError);
+  std::ofstream debug(debugPath, std::ios::trunc);
+  debug << "{\n"
+        << "  \"schema\": \"cxvision.fastmatch_headless_case_scan.v1\",\n"
+        << "  \"root\": \"" << JsonEscape(headlessRoot.string()) << "\",\n"
+        << "  \"discovered\": " << discovered << ",\n"
+        << "  \"accepted\": " << accepted << ",\n"
+        << "  \"rejected\": " << rejected.size() << ",\n"
+        << "  \"rejections\": [\n";
+  for (std::size_t index = 0; index < rejected.size(); ++index) {
+    debug << "    {\"path\": \"" << JsonEscape(rejected[index].manifest_path)
+          << "\", \"reason\": \"" << JsonEscape(rejected[index].reason)
+          << "\"}" << (index + 1 == rejected.size() ? "\n" : ",\n");
+  }
+  debug << "  ]\n}\n";
+
+  std::ostringstream summary;
+  summary << "FastMatch headless case scan root=" << headlessRoot.string()
+          << " discovered=" << discovered << " accepted=" << accepted
+          << " rejected=" << rejected.size() << " debug=" << debugPath.string();
+  reason = summary.str();
+  return accepted;
+}
+
 void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
   if (m_manualTest.script_evidence_groups_dirty == false)
     return;
@@ -4864,6 +5171,25 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
         m_manualTest.debug_reason.clear();
       }
       m_manualTest.debug_reason += assetCaseReason;
+    }
+  }
+
+  {
+    std::string headlessFastMatchReason;
+    AppendFastMatchHeadlessEvidenceCasesLocal(
+        m_manualTest,
+        [&](const std::string &label) -> ScriptEvidenceGroup & {
+          return findOrCreateGroup("", "", label);
+        },
+        headlessFastMatchReason);
+    if (!headlessFastMatchReason.empty()) {
+      if (!m_manualTest.debug_reason.empty() &&
+          m_manualTest.debug_reason != "not started") {
+        m_manualTest.debug_reason += "; ";
+      } else {
+        m_manualTest.debug_reason.clear();
+      }
+      m_manualTest.debug_reason += headlessFastMatchReason;
     }
   }
 
@@ -6012,10 +6338,8 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
                                             : "active_working_revision";
   } else {
     std::string lockedParamReason;
-    if (!resolved.workflow_id.empty()) {
-      parameterSource = "workflow_metadata";
-    } else if (EvidenceSnapshotHasLockedParamSummaryLocal(resolved,
-                                                          lockedParamReason)) {
+    if (EvidenceSnapshotHasLockedParamSummaryLocal(resolved,
+                                                    lockedParamReason)) {
       if (!ApplyEvidenceParameterSummaryToRuntimeGlobals(
               staged, resolved.parameter_summary, lockedParamReason)) {
         const std::string unsupportedPrefix =
@@ -6039,8 +6363,14 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
             staged.current_gauge.primary_object_name;
         staged.current_evidence_selection.primary_object_status =
             staged.current_gauge.primary_object_status;
-        parameterSource = "evidence_parameter_snapshot";
+        parameterSource = resolved.workflow_id.empty()
+                              ? "evidence_parameter_snapshot"
+                              : "workflow_metadata+evidence_parameter_snapshot";
       }
+    } else if (!resolved.workflow_id.empty()) {
+      // Workflow fields describe the review/promotion route.  They are not a
+      // replacement for the image/tool inputs that created the Evidence.
+      parameterSource = "workflow_metadata";
     }
   }
 
@@ -6209,6 +6539,12 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
   }
 
   reason = m_manualTest.debug_reason;
+  const auto committedRuntimeInt = [&](const std::string &key,
+                                       int fallback = 0) {
+    const auto found = m_manualTest.runtime_int_vars.find(key);
+    return found == m_manualTest.runtime_int_vars.end() ? fallback
+                                                        : found->second;
+  };
   CXLOG_INFO(
       "EvidenceChain", "evidence_selection_commit", "ready",
       m_manualTest.debug_reason + " primary_object=" +
@@ -6220,8 +6556,35 @@ bool ViewController::ApplyEvidenceSelectionSnapshotToManualContext(
           ",linegap=" + std::to_string(m_manualTest.current_gauge.linegap) +
           ",wgap=" + std::to_string(m_manualTest.current_gauge.wgap) +
           ",hgap=" + std::to_string(m_manualTest.current_gauge.hgap) +
-          ",filterprofile=" +
-          std::to_string(m_manualTest.current_gauge.filterprofile) + "}");
+           ",filterprofile=" +
+          std::to_string(m_manualTest.current_gauge.filterprofile) + "}" +
+          " learn_roi=(" +
+          std::to_string(committedRuntimeInt("global_learn_roi_x")) + "," +
+          std::to_string(committedRuntimeInt("global_learn_roi_y")) + "," +
+          std::to_string(committedRuntimeInt("global_learn_roi_w")) + "," +
+          std::to_string(committedRuntimeInt("global_learn_roi_h")) + ")" +
+          " search_roi=(" +
+          std::to_string(committedRuntimeInt("global_search_roi_x")) + "," +
+          std::to_string(committedRuntimeInt("global_search_roi_y")) + "," +
+          std::to_string(committedRuntimeInt("global_search_roi_w")) + "," +
+          std::to_string(committedRuntimeInt("global_search_roi_h")) + ")" +
+          " directional_wgap=(" +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_wgap_0")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_wgap_1")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_wgap_2")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_wgap_3")) +
+          ") directional_hgap=(" +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_hgap_0")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_hgap_1")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_hgap_2")) +
+          "," +
+          std::to_string(committedRuntimeInt("global_fastmatch_learn_hgap_3")) +
+          ")");
   return true;
 }
 
@@ -13014,6 +13377,234 @@ void ViewController::SelectScriptEvidenceThumb(int groupIndex, int thumbIndex) {
   }
 }
 
+static std::array<int, 4>
+ReadFastMatchTraceFourCountsLocal(const cv::FileNode &root,
+                                  const char *field) {
+  std::array<int, 4> result{};
+  const cv::FileNode values = root[field];
+  if (!values.isSeq())
+    return result;
+  int index = 0;
+  for (const cv::FileNode &value : values) {
+    if (index >= static_cast<int>(result.size()))
+      break;
+    result[static_cast<std::size_t>(index++)] = static_cast<int>(value);
+  }
+  return result;
+}
+
+static std::array<int, 4>
+ReadFastMatchTraceDirectionPointCountsLocal(const cv::FileNode &root,
+                                            const char *field) {
+  std::array<int, 4> result{};
+  const cv::FileNode directions = root[field];
+  if (!directions.isSeq())
+    return result;
+  int direction = 0;
+  for (const cv::FileNode &points : directions) {
+    if (direction >= static_cast<int>(result.size()))
+      break;
+    result[static_cast<std::size_t>(direction++)] =
+        points.isSeq() ? static_cast<int>(points.size()) : 0;
+  }
+  return result;
+}
+
+static void DrawFastMatchTracePointSampleLocal(const cv::FileNode &root,
+                                               const char *field,
+                                               int direction) {
+  const cv::FileNode directions = root[field];
+  if (!directions.isSeq() || direction < 0 || direction >= directions.size()) {
+    ImGui::TextDisabled("No point sequence available.");
+    return;
+  }
+  const cv::FileNode points = directions[direction];
+  if (!points.isSeq() || points.empty()) {
+    ImGui::TextDisabled("No points retained for this direction.");
+    return;
+  }
+
+  const int previewLimit = 12;
+  int index = 0;
+  for (const cv::FileNode &point : points) {
+    if (index >= previewLimit)
+      break;
+    if (point.isSeq() && point.size() >= 2) {
+      ImGui::Text("%d: (%.2f, %.2f)", index,
+                  static_cast<double>(point[0]),
+                  static_cast<double>(point[1]));
+    }
+    ++index;
+  }
+  if (points.size() > previewLimit)
+    ImGui::TextDisabled("Preview limited to %d of %d points; full sequence remains in line_trace.json.",
+                        previewLimit, points.size());
+}
+
+static void DrawFastMatchNormalTraceEvidenceLocal(
+    const CxEvidenceSelectionSnapshot &selection) {
+  if (!selection.valid || selection.evidence_output_root.empty())
+    return;
+
+  const std::filesystem::path tracePath =
+      std::filesystem::path(selection.evidence_output_root) / "line_trace.json";
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(tracePath, ec))
+    return;
+
+  cv::FileStorage trace;
+  try {
+    if (!trace.open(tracePath.string(),
+                    cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON)) {
+      ImGui::SeparatorText("FastMatch Normal-Trace Evidence");
+      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+                         "TRACE_ASSET_INVALID: %s", tracePath.string().c_str());
+      return;
+    }
+  } catch (const cv::Exception &) {
+    ImGui::SeparatorText("FastMatch Normal-Trace Evidence");
+    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+                       "TRACE_ASSET_INVALID: %s", tracePath.string().c_str());
+    return;
+  }
+
+  const cv::FileNode root = trace.root();
+  const std::array<int, 4> anchors =
+      ReadFastMatchTraceDirectionPointCountsLocal(
+          root, "anchor_points_by_direction");
+  const std::array<int, 4> nearCandidates =
+      ReadFastMatchTraceFourCountsLocal(root, "anchor_near_candidate_counts");
+  const std::array<int, 4> bandRejected =
+      ReadFastMatchTraceFourCountsLocal(root, "anchor_band_rejected_counts");
+  const std::array<int, 4> slopeRejected =
+      ReadFastMatchTraceFourCountsLocal(root, "anchor_slope_rejected_counts");
+  const std::array<int, 4> normalRejected =
+      ReadFastMatchTraceFourCountsLocal(root, "anchor_normal_rejected_counts");
+  const std::array<int, 4> prefilterAccepted =
+      ReadFastMatchTraceFourCountsLocal(root,
+                                        "anchor_prefilter_accepted_counts");
+  const std::array<int, 4> domain =
+      ReadFastMatchTraceFourCountsLocal(root, "domain_deduplicated_counts");
+  const std::array<int, 4> compressed =
+      ReadFastMatchTraceFourCountsLocal(root, "compressed_keypoint_counts");
+  const std::array<int, 4> annSelected =
+      ReadFastMatchTraceFourCountsLocal(root, "ann_selected_point_counts");
+  const std::array<int, 4> annEdges =
+      ReadFastMatchTraceFourCountsLocal(root, "ann_edge_counts");
+  const std::array<int, 4> annComponents =
+      ReadFastMatchTraceFourCountsLocal(root, "ann_component_counts");
+  const std::array<int, 4> pairCounts =
+      ReadFastMatchTraceFourCountsLocal(root, "normal_pair_counts_by_direction");
+  const char *directions[4] = {"Top", "Bottom", "Left", "Right"};
+
+  ImGui::SeparatorText("FastMatch Normal-Trace / ANN Evidence");
+  ImGui::TextDisabled("Read-only runtime evidence: %s", tracePath.string().c_str());
+  const bool executed = !root["normal_trace_executed"].empty() &&
+                        static_cast<int>(root["normal_trace_executed"]) != 0;
+  const bool succeeded = !root["normal_trace_succeeded"].empty() &&
+                         static_cast<int>(root["normal_trace_succeeded"]) != 0;
+  const std::string traceReason =
+      FileNodeStringLocal(root, "normal_trace_reason");
+  ImGui::Text("status=%s reason=%s", succeeded ? "NORMAL_TRACE_COMPLETE"
+                                                   : (executed ? "TRACE_INCOMPLETE"
+                                                               : "NOT_EXECUTED"),
+              traceReason.empty() ? "-" : traceReason.c_str());
+
+  ImGui::TextUnformatted("FindLine anchors and prefilter decisions");
+  if (ImGui::BeginTable("fastmatch_anchor_prefilter_table", 7,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_ScrollX |
+                            ImGuiTableFlags_SizingFixedFit,
+                        ImVec2(-1.0f, 0.0f), 760.0f)) {
+    ImGui::TableSetupColumn("Direction");
+    ImGui::TableSetupColumn("anchor_points_by_direction");
+    ImGui::TableSetupColumn("near candidates");
+    ImGui::TableSetupColumn("band rejected");
+    ImGui::TableSetupColumn("slope rejected");
+    ImGui::TableSetupColumn("normal rejected");
+    ImGui::TableSetupColumn("prefilter accepted");
+    ImGui::TableHeadersRow();
+    for (int direction = 0; direction < 4; ++direction) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(directions[direction]);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d", anchors[direction]);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%d", nearCandidates[direction]);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%d", bandRejected[direction]);
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%d", slopeRejected[direction]);
+      ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%d", normalRejected[direction]);
+      ImGui::TableSetColumnIndex(6);
+      ImGui::Text("%d", prefilterAccepted[direction]);
+    }
+    ImGui::EndTable();
+  }
+
+  if (ImGui::BeginTable("fastmatch_normal_trace_direction_table", 7,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_ScrollX |
+                            ImGuiTableFlags_SizingFixedFit,
+                        ImVec2(-1.0f, 0.0f), 980.0f)) {
+    ImGui::TableSetupColumn("Direction");
+    ImGui::TableSetupColumn("domain_points_by_direction");
+    ImGui::TableSetupColumn("compressed_points_by_direction");
+    ImGui::TableSetupColumn("ann_selected_points_by_direction");
+    ImGui::TableSetupColumn("ann_edge_counts");
+    ImGui::TableSetupColumn("ann_component_counts");
+    ImGui::TableSetupColumn("Normal A/B pairs");
+    ImGui::TableHeadersRow();
+    for (int direction = 0; direction < 4; ++direction) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(directions[direction]);
+      ImGui::TableSetColumnIndex(1);
+      ImGui::Text("%d", domain[direction]);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::Text("%d", compressed[direction]);
+      ImGui::TableSetColumnIndex(3);
+      ImGui::Text("%d", annSelected[direction]);
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%d", annEdges[direction]);
+      ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%d", annComponents[direction]);
+      ImGui::TableSetColumnIndex(6);
+      ImGui::Text("%d", pairCounts[direction]);
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::TextDisabled("Direction storage order is Top, Bottom, Left, Right; contour traversal is handled separately.");
+  for (int direction = 0; direction < 4; ++direction) {
+    const std::string label = std::string(directions[direction]) +
+                              " point samples##fastmatch_trace_" +
+                              std::to_string(direction);
+    if (ImGui::TreeNode(label.c_str())) {
+      ImGui::TextUnformatted("anchor_points_by_direction");
+      DrawFastMatchTracePointSampleLocal(root, "anchor_points_by_direction",
+                                         direction);
+      ImGui::Separator();
+      ImGui::TextUnformatted("domain_points_by_direction");
+      DrawFastMatchTracePointSampleLocal(root, "domain_points_by_direction",
+                                         direction);
+      ImGui::Separator();
+      ImGui::TextUnformatted("compressed_points_by_direction");
+      DrawFastMatchTracePointSampleLocal(root,
+                                         "compressed_points_by_direction",
+                                         direction);
+      ImGui::Separator();
+      ImGui::TextUnformatted("ann_selected_points_by_direction");
+      DrawFastMatchTracePointSampleLocal(root,
+                                         "ann_selected_points_by_direction",
+                                         direction);
+      ImGui::TreePop();
+    }
+  }
+}
+
 void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
   if (m_manualTest.script_evidence_groups.empty()) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
@@ -13099,6 +13690,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         return {1, "Verified"};
       if (categoryOverride == "Defect")
         return {2, "Defect"};
+      if (categoryOverride == "FastMatch Trace Diagnostics")
+        return {-2, "FastMatch Trace Diagnostics"};
       return {0, "To Verify"};
     }
     return ClassifyEvidenceMajorBucketLocal(m_manualTest, thumb, group.label);
@@ -13633,6 +14226,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
   }
 
   ImGui::EndChild();
+  DrawFastMatchNormalTraceEvidenceLocal(
+      m_manualTest.current_evidence_selection);
 }
 
 static std::string

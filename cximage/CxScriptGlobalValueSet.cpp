@@ -242,6 +242,27 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_match_thre"] = 10.0;
     overrides["global_fastmatch_action"] = 3.0;
     overrides["global_fastmatch_scan_rotation_deg"] = 0.0;
+    overrides["global_fastmatch_learn_shared"] = 0.0;
+    for (int direction = 0; direction < 4; ++direction)
+    {
+        const std::string suffix = "_" + std::to_string(direction);
+        const bool oppositeSide = direction == 1 || direction == 3;
+        overrides["global_fastmatch_learn_wgap" + suffix] =
+            direction < 2 ? 8.0 : 2.0;
+        overrides["global_fastmatch_learn_hgap" + suffix] =
+            direction < 2 ? 2.0 : 8.0;
+        overrides["global_fastmatch_learn_method" + suffix] =
+            oppositeSide ? 1.0 : 0.0;
+        overrides["global_fastmatch_learn_threshold" + suffix] =
+            static_cast<double>(options.threshold);
+        overrides["global_fastmatch_learn_linegap" + suffix] =
+            static_cast<double>(options.linegap);
+        overrides["global_fastmatch_learn_objfilter" + suffix] = 1.0;
+        overrides["global_fastmatch_learn_compare_gap" + suffix] =
+            static_cast<double>(options.compare_gap);
+        overrides["global_fastmatch_learn_edge_count" + suffix] = 2.0;
+        overrides["global_fastmatch_learn_selected_edge" + suffix] = 0.0;
+    }
     overrides["global_fastmatch_geometry_source_index"] = 0.0;
     overrides["global_fastmatch_geometry_weight_percent"] = 25.0;
     overrides["global_fastmatch_max_pose_candidates"] = 32.0;
@@ -276,6 +297,22 @@ std::map<std::string, double> BuildHeadlessGlobalOverrides(
     overrides["global_fastmatch_normaltrace_junction_min_cross_angle_deg"] = 12.0;
     overrides["global_fastmatch_normaltrace_junction_max_extrapolation_percent"] = 150.0;
     overrides["global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent"] = 800.0;
+    // FastMatch-owned dense shape model and bidirectional form-fit. Disabled by
+    // default so legacy rigid/Normal-Trace scripts remain bitwise compatible.
+    overrides["global_fastmatch_formfit_enabled"] = 0.0;
+    overrides["global_fastmatch_formfit_dense_step_milli_px"] = 1000.0;
+    overrides["global_fastmatch_formfit_profile_half_width_milli_px"] = 2500.0;
+    overrides["global_fastmatch_formfit_profile_step_milli_px"] = 250.0;
+    overrides["global_fastmatch_formfit_min_gradient"] = 4.0;
+    overrides["global_fastmatch_formfit_curvature_threshold_millideg"] = 12000.0;
+    overrides["global_fastmatch_formfit_ann_radius_milli_px"] = 8000.0;
+    overrides["global_fastmatch_formfit_normal_tolerance_deg"] = 35.0;
+    overrides["global_fastmatch_formfit_trim_percent"] = 20.0;
+    overrides["global_fastmatch_formfit_min_mutual_pairs"] = 6.0;
+    overrides["global_fastmatch_formfit_max_iterations"] = 8.0;
+    overrides["global_fastmatch_formfit_max_elapsed_ms"] = 80.0;
+    overrides["global_fastmatch_formfit_max_anchors"] = 64.0;
+    overrides["global_fastmatch_formfit_allow_affine"] = 1.0;
 
     overrides["global_ocr_threshold"] = 110.0;
     overrides["global_ocr_foreground_mode"] = 1.0;

@@ -1,0 +1,1365 @@
+尚未完成的是量测模型算法链
+
+当前尚未真正完成：
+
+```text
+几何回归 Head
+Geometry Target → Head 输出绑定
+正式 Task-Aligned Assignment
+Mask / Boundary / Geometry 联合分配
+Dice / Boundary / Geometry / Consistency Loss
+工业干扰增强 → YOLOv8-Seg 训练接入
+增量训练抗遗忘
+Parent / Child 几何结果蒸馏
+量测误差直接进入训练目标
+```
+
+因此当前正式状态应写成：
+
+> **YOLOv8-Seg 工程训练与推理链已经接通；面向精密量测的模型结构与训练目标仍处于合同和数据准备阶段。**
+
+不能写成：
+
+> YOLOv8-Seg 量测模型已经完成。
+
+
+这一层仍未闭合。
+
+正式结构应是：
+
+```text
+Runtime Foundation
+        ↓
+Metrology Model Algorithm
+        ↓
+FindSegmentation Application
+```
+
+
+## 6.2 当前几何参数从哪里来
+
+目前系统中的：
+
+```text
+centroid
+oriented rectangle
+major/minor axis
+pixel area
+circle / ellipse / line fit
+```
+
+来自：
+
+```text
+Mask / Contour
+→ OpenCV 与传统几何拟合
+```
+
+而不是来自 learned geometry head。YOLOv8-Seg Executor 确实会输出 oriented rectangle、面积和精修点，但这些属于后处理派生结果。
+
+当前训练目标分配
+
+当前 YOLOv8-Seg `compute_losses()` 对每个 GT：
+
+```text
+计算 GT 中心
+→ 在 P3/P4/P5 各选一个中心 Cell
+→ 三个尺度都计算 Class / Mask / Box / DFL
+```
+
+它不是正式 YOLOv8 Task-Aligned Assignment。
+
+仓库虽然存在独立的 `TaskAlignedAssigner`，包含：
+
+```text
+class score × IoU
+anchor center inside GT
+top-k candidate
+冲突处理
+```
+
+但当前 YOLOv8-Seg Executor 中没有调用它。
+
+因此：
+
+```text
+Center Cell Smoke Assignment      [Implemented]
+Detection TaskAlignedAssigner     [Implemented as separate utility]
+YOLOv8-Seg 正式 Assignment        [Not Integrated]
+Mask / Geometry Target Propagation[Not Implemented]
+```
+
+## 6.4 当前损失
+
+当前训练 Loss 主要是：
+
+```text
+Class BCEWithLogits
+Mask BCEWithLogits
+Box Distance L1
+DFL Cross Entropy
+```
+
+没有接入：
+
+```text
+Dice Loss
+Boundary Distance Loss
+Chamfer / Hausdorff
+Geometry Parameter Loss
+Mask-Geometry Consistency
+Clean-Augmented Consistency
+Incremental Distillation
+Uncertainty Calibration Loss
+```
+
+当前 Executor 中也未找到 Task-Aligned 或 Dice 的实际调用。
+
+## 6.5 当前数据增强
+
+公共 `torch_data_augmenter.h` 主要仍是：
+
+```text
+HSV
+Flip
+Resize / Letterbox
+```
+
+并以检测框 Annotation 为主。
+
+受控几何模块已经能生成复杂干扰样本，但这些样本尚未由当前 YOLOv8-Seg 训练循环正式消费。
+
+因此应区分：
+
+```text
+Offline Controlled Augmentation Dataset [Implemented]
+YOLOv8-Seg Training Augmenter            [Not Integrated]
+Augmentation Consistency Loss            [Not Implemented]
+```
+
+---
+
+# 7. YOLOv8-Seg Metrology V2 目标结构
+
+原始模型应冻结为：
+
+```text
+YoloV8SegmentImpl V1
+```
+
+用于：
+
+```text
+官方结构与权重兼容
+严格映射
+原始推理基线
+原始训练基线
+回归比较
+```
+
+新模型建议单独建立：
+
+```text
+YoloV8SegMetrologyImpl V2
+```
+
+目标结构：
+
+```text
+Backbone
+→ PAN / FPN
+→ Standard YOLOv8-Seg Head
+   ├─ Box
+   ├─ Class
+   ├─ Mask Coefficient
+   └─ Proto
+
+→ Geometry Regression Head
+   ├─ Primitive Type
+   ├─ Center Offset
+   ├─ Size / Radius / Axes
+   ├─ Orientation sin/cos
+   ├─ Geometry Quality
+   └─ Uncertainty
+```
+
+建议第一版统一输出：
+
+```text
+primitive_type_logits
+center_dx
+center_dy
+size_a
+size_b
+sin_theta
+cos_theta
+geometry_quality
+log_sigma
+```
+
+通过 `geometry_valid_mask` 支持：
+
+```text
+Circle
+Ellipse
+Rectangle / OBB
+Line
+Arc
+Freeform
+```
+
+不同元素只监督其有效参数。
+
+---
+
+# 8. Geometry Target 与训练目标
+
+当前受控数据生成器已形成：
+
+```text
+geometry_facts.json
+training_target.json
+metrology_target.json
+typed_label.png
+latent_boundary_map.png
+```
+
+下一步必须把这些合同真正转换为训练 Tensor。
+
+建议实例 Target：
+
+```cpp
+struct YoloV8SegMetrologyTarget
+{
+    int class_id;
+
+    Tensor box;
+    Tensor instance_mask;
+    Tensor boundary_map;
+
+    int primitive_type;
+
+    Tensor center_xy;
+    Tensor size_ab;
+    Tensor orientation_sincos;
+
+    Tensor geometry_parameter_valid_mask;
+
+    float visibility_ratio;
+    float identifiable_weight;
+};
+```
+
+Target 来源优先级：
+
+```text
+人工确认的高精度几何
+→ 受控几何 Ground Truth
+→ 传统算法 + 人工审核结果
+→ 高质量 Mask / Contour 拟合结果
+→ 普通多边形标注
+```
+
+模型自身预测出来的 Mask 不得反过来作为同一模型的独立几何 Ground Truth。
+
+---
+
+# 9. 正式目标分配
+
+正式训练应统一展开所有 P3/P4/P5 候选：
+
+```text
+decoded boxes
+class predictions
+anchor centers
+GT classes
+GT boxes
+```
+
+经过正式 Task-Aligned Assignment 后输出：
+
+```text
+foreground_mask
+assigned_gt_indices
+target_scores
+target_boxes
+target_labels
+```
+
+同一个 `assigned_gt_index` 再传播给：
+
+```text
+Mask Target
+Boundary Target
+Geometry Target
+Measurement Target
+```
+
+即：
+
+```text
+Positive Anchor
+        ↓
+同一 GT Instance
+        ├─ Class
+        ├─ Box
+        ├─ DFL
+        ├─ Mask
+        ├─ Boundary
+        └─ Geometry
+```
+
+禁止继续把：
+
+```text
+每个 GT
+→ 每个尺度中心 Cell
+```
+
+作为正式训练策略。
+
+---
+
+# 10. 正式 Loss 体系
+
+建议第一版：
+
+```text
+L_total =
+    λ_cls       L_cls
+  + λ_box       L_ciou
+  + λ_dfl       L_dfl
+  + λ_mask      L_mask
+  + λ_boundary  L_boundary
+  + λ_geometry  L_geometry
+  + λ_cons      L_consistency
+```
+
+## 10.1 Mask
+
+```text
+BCE + Dice
+```
+
+小目标或极端不平衡再评估：
+
+```text
+Focal / Tversky
+```
+
+## 10.2 Boundary
+
+优先比较：
+
+```text
+Distance Transform Boundary Loss
+Chamfer Distance
+Sampled Contour Loss
+```
+
+不建议第一版同时堆入所有边界 Loss。
+
+## 10.3 Geometry
+
+```text
+Primitive Type:
+Cross Entropy
+
+Center:
+SmoothL1
+
+Radius / Axes / Width / Height:
+SmoothL1 或 relative log loss
+
+Angle:
+sin/cos vector loss
+
+Uncertainty:
+Gaussian NLL 或校准损失
+```
+
+## 10.4 Mask-Geometry 一致性
+
+将预测几何渲染成：
+
+```text
+Geometry Mask / Geometry Boundary
+```
+
+再与实例 Mask 或 Boundary Target 比较。
+
+## 10.5 增量训练
+
+Parent / Child 至少对旧数据保持：
+
+```text
+Class Logits
+Mask Logits
+Features
+Geometry Parameters
+```
+
+一致，形成 Distillation Loss。
+
+---
+
+# 11. 去干扰增强接入原则
+
+## 11.1 几何不变增强
+
+```text
+亮度
+Gamma
+局部亮度梯度
+传感器噪声
+暗角
+轻度模糊
+压缩
+局部反光
+阴影
+灰尘
+纹理干扰
+```
+
+只修改图像，不修改 Geometry Target。
+
+## 11.2 几何变化增强
+
+```text
+平移
+旋转
+缩放
+翻转
+裁剪
+弹性变形
+```
+
+必须同步变换：
+
+```text
+BBox
+Mask
+Polygon
+Boundary
+Center
+Axes
+Angle
+Line Endpoints
+Anchor
+Measurement Ref
+```
+
+## 11.3 结构干扰
+
+```text
+Gap
+Line Break
+Jagged Edge
+Partial Visibility
+Occlusion
+```
+
+必须明确：
+
+```text
+预测可见部分
+```
+
+还是：
+
+```text
+恢复完整几何
+```
+
+两种任务不能混为同一 Target。
+
+当前生成器已经记录：
+
+```text
+visibility_ratio
+partial_visibility
+identifiable
+degradation
+rejection_reason
+```
+
+这些字段应直接进入训练有效性权重，而不能只停留在 Evidence JSON。
+
+---
+
+# 12. FindSegmentation 当前状态
+
+## 12.1 已完成
+
+```text
+Task / Model / Package / Profile 输入合同
+Raw / Refined / Fallback 结果合同
+Contour → Circle / Ellipse / OBB / Line 几何拟合
+Primitive Hypothesis
+Predictive Geometry Gate 基础
+```
+
+## 12.2 当前断点
+
+### RegionSet 尚未真正填充
+
+虽然 `FindSegmentationRegion` 已定义，但在当前两个 Backend 中未发现 `output.regions` 的写入。
+
+### 仍只处理主要轮廓
+
+`extractboundary()` 和显示投影目前都选择面积最大的轮廓；YOLOv8-Seg 多实例结果还没有逐实例进入 Geometry 和 Measurement。
+
+### Raw 与 Refinement 仍混合在 Backend
+
+Torch Backend 在 Raw Mask 后执行 ROI 约束和 GrabCut Prompt Refinement。模型原始能力和传统后处理效果必须分别评价。
+
+### 传统基线仍是 Smoke
+
+OpenCV Backend 仍固定使用：
+
+```text
+Gaussian Blur 3×3
+Canny 50 / 150
+Contour Area Filter
+```
+
+它只能作为确定性 Smoke，不代表传统参数整定最优解。
+
+---
+
+# 13. Canonical Result 当前缺口
+
+当前 YOLOv8-Seg Runtime Artifact 已有：
+
+```text
+stable_id
+bbox
+class
+confidence
+mask
+contour
+centroid
+oriented rectangle
+refined points
+rejected points
+measurement evidence
+```
+
+但是 `TorchRuntimeResultAdapter` 最终主要把每个 Instance 压成普通 `CxTorchDetection`，只保留 bbox、class 和 confidence。
+
+当前 `CxInferenceResult` 也没有正式的：
+
+```text
+CxTorchInstance[]
+```
+
+结构。
+
+建议在现有结果中增加：
+
+```cpp
+struct CxTorchInstance
+{
+    std::string stable_id;
+
+    int class_id;
+    std::string class_name;
+    double confidence;
+
+    CxTorchDetection bbox;
+
+    std::string mask_ref;
+    std::string contour_ref;
+    std::string refined_boundary_ref;
+    std::string measurement_ref;
+
+    double centroid_x;
+    double centroid_y;
+    double pixel_area;
+
+    std::map<std::string, double> metrics;
+};
+```
+
+禁止新建平行的：
+
+```text
+YoloSegResultV2
+GeometryModelResult
+```
+
+正式数据源。
+
+---
+
+# 14. libtorchsegmentation 与 Model Inspection
+
+`libtorchsegmentation` 已经提供：
+
+```text
+Backbone
+features()
+features_at()
+Encoder / Decoder / Head
+```
+
+说明项目已有较成熟的模型 Stage 解构思想。
+
+后续不应从零建设第二套 Darknet Runtime，而应增加轻量：
+
+```text
+Model Stage Inspection
+```
+
+统一服务于：
+
+```text
+YOLOv8-Seg
+DeepLab
+ResNet
+EdgeSAM
+```
+
+第一版只记录：
+
+```text
+stage name
+module path
+input stages
+weight prefixes
+input/output shape
+parameter count
+dtype/device
+runtime
+```
+
+用途限定为：
+
+```text
+结构检查
+权重映射
+Tensor Trace
+性能 Profiling
+量化规划
+```
+
+不得扩展成：
+
+```text
+Graph Executor
+Tensor Scheduler
+Alternative Runtime
+Graph Compiler
+```
+
+---
+
+# 15. 权重映射与性能当前缺口
+
+## 15.1 Strict Loader 非原子
+
+当前 `load_state_dict_strict()` 在验证过程中直接 `copy_()`，最后才检查报告是否完整。失败时模型可能已被部分修改。
+
+应改为：
+
+```text
+Phase A:
+Inspect all keys / shapes / dtype
+
+complete = false
+→ 输出报告
+→ 不修改模型
+
+complete = true
+→ Phase B copy
+```
+
+## 15.2 Mapping Report 未真实输出错误内容
+
+当前落盘 JSON 固定写入空的：
+
+```text
+missing_keys
+unknown_keys
+shape_mismatches
+```
+
+以及 `complete=true`，没有序列化真实 Report。
+
+## 15.3 计时边界不完整
+
+当前 `elapsed_ms` 同时赋给：
+
+```text
+infer_runtime_ms
+algorithm_runtime_ms
+```
+
+且没有完整覆盖后续 Mask、Contour、Edge Refinement 和 Artifact 写出。
+
+最终应拆为：
+
+```text
+preprocess
+H2D
+backbone
+neck
+head
+D2H
+DFL / decode / NMS
+mask reconstruction
+geometry refinement
+artifact
+total
+```
+
+---
+
+# 16. Development Case 生命周期
+
+当前开发基线已经确定：
+
+```text
+Development
+→ 同一 case_id 原位覆盖
+
+Released
+→ revision + 1
+```
+
+但现有代码仍通过：
+
+```text
+candidate_YYYYMMDD_HHMMSS
+```
+
+建立时间戳目录，并将每次保存作为新的不可变 Evidence Row。
+
+因此状态应标记为：
+
+```text
+Development Overwrite Policy [Policy Defined]
+Current Timestamp Storage     [Still Implemented]
+Lifecycle Migration           [Pending]
+```
+
+这一问题与模型算法无关，但会直接污染多策略比较 Case，必须在正式建立：
+
+```text
+traditional
+V1
+V2
+hybrid
+parent
+child
+```
+
+比较前完成修正。
+
+---
+
+# 17. 标准完整闭环
+
+## 17.1 Model Package Gate
+
+```text
+Architecture
+→ Stage Description
+→ Weight Mapping
+→ Raw Tensor Parity
+→ Postprocess Parity
+→ Fixed Inference
+→ Model Package Accepted
+```
+
+## 17.2 Model Algorithm Gate
+
+```text
+Geometry Target
+→ Augmentation
+→ Assignment
+→ Geometry Head
+→ Specialized Loss
+→ Synthetic Overfit
+→ Real Data Train
+→ Ablation
+```
+
+## 17.3 FindSegmentation 应用链
+
+```text
+Traditional / DeepLab / YOLOv8-Seg / Hybrid
+→ RegionSet
+→ Boundary
+→ Sparse Points
+→ Traditional Refinement
+→ Geometry
+→ Measurement
+```
+
+## 17.4 增量训练链
+
+```text
+Failure Case
+→ Human Corrected Label
+→ Dataset Snapshot
+→ Parent Model
+→ Child Training
+→ Parent / Child Paired Inference
+→ Holdout Regression
+→ Human Promotion
+```
+
+## 17.5 诊断闭环
+
+```text
+Controlled Reference
+→ Model / Traditional Output
+→ Geometry Reference Evaluator
+→ Predictive Gate
+→ Measurement Error
+→ Failure Classification
+→ Next Action
+→ Human Review
+```
+
+---
+
+
+# 19. 后续推进顺序
+
+## P0 — 冻结基线与构建
+
+完成：
+
+```text
+Clean Build
+固定 V1 Model
+固定 Weights Hash
+固定 Controlled Dataset
+固定 train / validation / holdout
+修正 Development Case 存储
+```
+
+## P1 — 将增强数据接入训练
+
+把现有：
+
+```text
+dataset_manifest
+training_target
+typed_label
+boundary_map
+geometry_facts
+```
+
+转换成 YOLOv8-Seg DataLoader 实际输入。
+
+Gate：
+
+```text
+固定 Seed
+图像与所有 Target 同步变换
+训练日志记录 augmentation trace
+```
+
+## P2 — 正式 Target Assignment
+
+将独立 `TaskAlignedAssigner` 改造并接入 Seg 训练。
+
+Gate：
+
+```text
+每个正样本有唯一 GT Instance
+Box / Mask / Boundary / Geometry Target 身份一致
+```
+
+## P3 — Metrology V2 Geometry Head
+
+保留 V1，新增 V2。
+
+Gate：
+
+```text
+合成圆、椭圆、矩形和线能够过拟合
+几何参数误差稳定趋近于零
+```
+
+## P4 — 新 Loss
+
+按顺序加入：
+
+```text
+A1 BCE + Dice
+A2 Boundary Loss
+A3 Geometry Loss
+A4 Mask-Geometry Consistency
+A5 Clean-Augmented Consistency
+A6 Incremental Distillation
+```
+
+每次只增加一组，必须有消融结果。
+
+## P5 — Model Inspection / Parity
+
+```text
+Stage
+→ Weight
+→ Tensor
+→ Runtime
+```
+
+验证 Python/C++ RawOutput 和后处理一致性。
+
+## P6 — FindSegmentation RegionSet
+
+```text
+每个实例
+→ Region
+→ Boundary
+→ Sparse Points
+→ Geometry
+```
+
+禁止继续只处理最大轮廓。
+
+## P7 — 多策略比较
+
+同一个 Case 比较：
+
+```text
+traditional_tuned
+YOLOv8-Seg V1
+YOLOv8-Seg V2
+V2 + traditional refinement
+DeepLab + MobileNetV3
+```
+
+## P8 — 增量训练
+
+```text
+Parent
+→ Corrected Samples
+→ Child
+→ Distillation
+→ Holdout
+→ Promotion
+```
+
+## P9 — 性能优化
+
+仅在模型正确性与应用价值通过后推进：
+
+```text
+Model Resident
+→ Reduce D2H
+→ FP16
+→ 必要时 INT8
+```
+
+---
+
+# 20. 必须执行的验证 Gate
+
+## G1：Target Transform
+
+旋转、缩放、翻转后必须同步验证：
+
+```text
+Box
+Mask
+Boundary
+Center
+Axes
+Angle
+Line Endpoints
+```
+
+## G2：Synthetic Overfit
+
+少量受控样本上：
+
+```text
+Mask
+Geometry Type
+Center
+Radius / Axes
+Angle
+```
+
+必须能够过拟合。
+
+## G3：Assignment Visualization
+
+输出：
+
+```text
+GT Instance
+Positive Anchors
+Assigned Scale
+Alignment Score
+Conflict Resolution
+```
+
+## G4：Loss Gradient
+
+分别只开启：
+
+```text
+Mask
+Boundary
+Geometry
+Consistency
+```
+
+验证梯度到达预期 Head、Neck 和 Backbone。
+
+## G5：干扰鲁棒性
+
+固定同一元素比较：
+
+```text
+Clear
+Blur
+Noise
+Brightness
+Gap
+Jagged Edge
+Partial Visibility
+```
+
+## G6：应用价值
+
+比较：
+
+```text
+漏检率
+Boundary Error
+Geometry Error
+Measurement Error
+Repeatability
+Sparse Point Coverage
+Runtime
+```
+
+## G7：增量回归
+
+Child 必须：
+
+```text
+目标问题改善
+旧类不明显退化
+Holdout 通过
+人工 Review 通过
+```
+
+## G8：性能
+
+必须同时满足：
+
+```text
+Accuracy Gate
++
+Performance Gate
+```
+
+ 
+
+建议新增 Artifact：
+
+```text
+model_baseline.json
+model_stage_report.json
+weight_mapping_report.json
+augmentation_trace.json
+assignment_trace.json
+loss_breakdown.json
+geometry_head_output.json
+instance_result.json
+sparse_boundary.json
+strategy_comparison.json
+parent_child_regression.json
+promotion_gate.json
+```
+
+---
+
+# 23. 最终结论
+
+当前代码已经具备：
+
+```text
+运行模型的能力
+训练模型的能力
+生成受控几何数据的能力
+生成干扰数据的能力
+生成几何 Target 合同的能力
+从 Mask 做传统几何拟合的能力
+做 Predictive Gate 的能力
+生成 Evidence 的能力
+```
+
+但当前尚未具备：
+
+```text
+模型直接预测几何参数的能力
+正式实例正样本分配
+面向边界和量测的联合 Loss
+去干扰增强驱动的正式训练
+抗遗忘增量训练
+实例级 Canonical Result 完整传递
+模型几何结果与传统参数结果的完整同 Case 比较
+```
+
+所以当前最准确的管理结论是：
+
+ 
+下一阶段不应继续增加新的：
+
+```text
+Runtime
+Bridge
+Manager
+Evidence Framework
+```
+
+而应集中完成：
+
+```text
+Target
+→ Augmentation
+→ Assignment
+→ Geometry Head
+→ Specialized Loss
+→ Training
+→ FindSegmentation
+→ Sparse Geometry
+→ Measurement
+→ Incremental Promotion
+```
+
+
+现有 YOLOv8-Seg 是“工程训练/推理链已接通”，不是
+  量测模型已完成。下一阶段应从 P0/P1/P2 开始，先冻结 V1 并把已有几何
+  合同、增强与正式 Task-Aligned Assignment 接到训练链，之后才进入 V2
+  几何头和专用 Loss。当前环境是只读，我先核对这些接缝的真实代码状态，
+  避免按文档假设推进。
+
+完整主线。
+
+ - 现有工程已具备 YOLOv8-Seg 运行、训练、受控几何数据、传统几何拟合
+    和 Evidence。
+
+  - 量测模型主链尚未闭合：正式 Task-Aligned Assignment、几何 Target
+    Tensor、V2 Geometry Head、Dice/Boundary/Geometry/Consistency
+    Loss、增强训练接入、蒸馏与实例级结果传递都仍需实现。
+
+  - 下一落地点应严格是 P1 → P2：先将 training_target /
+    geometry_facts / boundary_map 转为 Seg DataLoader 的真实 Tensor，
+    并接入同步几何增强；随后让 P3/P4/P5 全候选经过正式 Assignment，再
+    把同一 GT 身份传播到 Box/Mask/Boundary/Geometry。
+
+  - 不应继续新增 Runtime、Bridge 或 Evidence 框架，也不能宣称量测模型
+    已完成。
+
+  当前会话文件系统是只读，不能安全修改源码、生成测试输出或编译。因此
+  本轮无法实际“落地” P1/P2。恢复可写环境后，我会直接从
+  torch_runtime_yolov8_seg_executor、torch_taskalignedassigner、
+  torch_data_augmenter 与现有 geometry_facts/training_target 数据接缝
+  开始实现，并先完成 G1（Target Transform）与 G3（Assignment
+  Visualization）证据。
+  
+  
+可写环境已恢复。我按 P1/P2 先做真实接缝，而不是直接堆 V2 头：确认现
+  有 Seg 训练的数据结构、compute_losses() 和独立 Task-Aligned
+  Assigner 的输入输出，然后把几何合同转成可训练 Target 的最小闭环。
+
+• 接缝核对发现一个关键事实：标准检测损失模块确实已经使用
+  TaskAlignedAssigner，但 Seg Executor 的训练 lambda 仍是“每个 GT ×
+  每个尺度中心 Cell”。因此不能声称 P2 已完成。为了先完成 P0 的可回滚
+  基础，我先修复 V1 严格权重加载的原子性：校验失败时不再修改任何模型
+  参数。随后再把 P1/P2 拆成可验证的独立实现。
+
+
+• 已推进 P0 基线安全项：
+
+  - 修复 V1 YoloV8SegmentImpl::load_state_dict_strict() 的非原子加
+    载。
+
+  - 现在先完整检查 keys、shape 与 dtype 兼容性；任一项失败时不复制权
+    重，不污染已加载的父模型。
+
+  - 只有完整检查通过后才进入复制阶段，因此保留稳定 V1 基线与回滚语
+    义。
+
+  COMPILE_PASS：cxvision_imgui_acceptance 与 libtorch_module_runtime
+  已重新构建成功（仅有既有模板转换 warning，无链接/未解析符号错误）。
+
+  同时已确认 P2 的真实缺口：torch_v8loss.h 有 Task-Aligned Assigner，
+  但 torch_runtime_yolov8_seg_executor.cpp 的 Seg 训练仍使用三尺度中
+  心 Cell 分配，尚未接入正式 Assignment。下一步将直接实现 P1 的
+  Geometry Target Tensor/同步增强接口，再改造该 Seg Executor 使用全候
+  选 Task-Aligned Assignment，并输出 G1/G3 证据。
+
+
+
+  - YOLOv8-Seg 训练的 Mask Loss 已从纯 BCE 扩展为 BCE + Dice。
+  - 新增可外引参数 mask_dice_loss_weight，默认 1.0；训练回执记录为
+    loss_phase=weighted_class_mask_bce_dice_box_dfl。
+
+  - V1 模型结构未改动；这是真实训练损失改进，不是几何头或量测结果的伪
+    替代。
+
+  - COMPILE_PASS：指定目标已成功重建，仅保留已有 C4267 编译 warning。
+
+  下一步仍是主线 P1/P2：把 geometry_facts / training_target /
+  boundary_map 进入真实 Tensor/DataLoader，并替换 Seg Executor 的中心
+  Cell 分配为正式 Task-Aligned Assignment。
+
+
+
+• P1 的资产接缝已定位：当前 Mask Package 只复制 image/mask 和 bbox 标
+  签，未把 geometry/boundary 合同带入训练包。现在把该包升级为自包含的
+  Target Package：缺任何几何合同即显式预检失败，不再静默降级为普通分
+  割训练。
+
+
+
+• 继续完成 P1 的数据包接缝：
+
+  - CxGeometryYoloMaskPackage 不再只导出图像、Mask 与 bbox 标签。
+  - 每个训练样本现在必须携带并复制：
+      - geometry_facts.json
+      - training_target.json
+      - metrology_target.json
+      - latent_boundary_map.png
+
+  - 包 manifest 为每项写入这四类 Target 引用与
+    geometry_target_status=READY。
+
+  - 缺少任一 Target 资产会明确 GEOMETRY_MASK_PACKAGE_PREFLIGHT_FAIL，
+    不会静默退化为普通 YOLOv8-Seg 训练。
+
+  COMPILE_PASS：指定 cxvision_imgui_acceptance 已重建成功。
+
+  当前 P1 状态：Target Package 已自包含；Seg DataLoader 尚未消费这些
+  Geometry/Boundary Tensor。 下一步将实现 Tensor 解析、同步几何变换与
+  G1 transform evidence，再推进正式 Task-Aligned Assignment。
+
+
+
+
+ 下一步把自包含 Target Package 接入 Seg DataLoader：从
+  package_manifest.json 读取 image/mask/四类 Target 引用，验证其存
+  在，并由冻结 Mask 构造实例多边形。此处的几何资产只作为人工/受控真值
+  来源随样本进入训练，不会由模型预测反向生成。
+
+
+
+ P1 再推进一层，已完成 Target Package → Seg DataLoader 接入：
+
+  - Seg DataLoader 识别 package_manifest.json 的几何 Target Package。
+  - 每个样本会验证并保留 image、instance mask、geometry_facts、
+    training_target、metrology_target、boundary_map 的引用。
+
+  - 实例多边形只从冻结 target_mask 构造；若缺 Target、Mask 不可读或不
+    是单实例有效轮廓，训练前明确失败。
+
+  - validation split 会规范化为训练器使用的 val。
+
+  COMPILE_PASS：指定目标重建成功。
+
+  当前边界保持清楚：几何/边界真值已进入训练样本合同，但尚未转换成
+  Geometry/Boundary Tensor 并参与 Loss；下一步是 G1 同步变换与 Tensor
+  绑定，之后才能安全替换中心 Cell Assignment。
+
+• 已确认一个关键数据契约缺口：当前训练资产的第七类是 rectangle，而已
+  定义的七类分类契约要求 closed_curve。此外 arc / line / open_curve
+  的 instances 为空，不能以“首实例”方式构造专有几何监督。下一步先核实
+  其真实字段，再把目标张量设计为“显式字段 + 有效掩码”，同时把类别词表
+  不一致作为阻断记录，而不是静默映射。
+
+
+已推进 P2 的参数控制链，并 COMPILE_PASS。
+
+  训练配置现已实际读取、校验并写入训练证据：
+
+  - assignment_topk：1–100，默认 3
+  - classification_focal_gamma：0–10，默认 2.0
+  - use_assignment_quality_targets：0/1，默认启用
+
+  这些参数会出现在 training_trace.json 的 assignment_controls，为界面配置、自动调优参数包和人工复核提供同一
+  事实来源。
+
+  当前仍明确标记为 legacy_center_cell，因为 TAL 尚未替换训练损失中的正样本索引；没有误报参数已生效。下一步是
+  实现 DFL-aware 全局 anchor 展开与同索引的 class/box/DFL/mask 联合损失。
+  
+   已完成 P2 的全局 anchor 数据面，COMPILE_PASS。
+
+  当前 Seg executor 每次 loss 计算都会：
+
+  - 展开 P3/P4/P5 的分类 logits、64 通道 DFL logits、mask coefficients；
+  - 由 DFL expectation 解码为统一归一化框；
+  - 生成全局 anchor center、对应 grid 宽高；
+  - 拼接为单一 SegTaskAlignedAnchorTable。
+
+  这保证后续 TAL 分派得到的正样本索引可以同时定位分类、DFL、box 与 mask coefficient，不会再受三尺度中心点逻
+  辑限制。
+
+  当前阶段仍未替换损失中的中心单点分派，因此状态没有提前升级。下一步直接以该全局表调用 TaskAlignedAssigner，
+  并把正样本索引接入四类损失。
+  
+  
+   第二个包满足 mask schema与 train/validation/holdout 划分，但缺少新 P1 所需的 geometry_facts /
+  training_target / metrology_target / boundary_map，当前严格 loader 会拒绝它。真实训练的当前阻断点已收敛
+  为：尚未生成符合新 schema 的可重放几何目标包，而不是模型或 TAL 代码。
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• 当前不能启动本轮真实训练，原因已定位且可复核：
+
+  - “full seven class”包：旧 aabb_package.v1，不含 mask/geometry target。
+  - cxx_mask_package：有 mask，但缺少 geometry_facts、training_target、metrology_target、boundary_map。
+  - 当前严格 P1 loader 必须拒绝两者，避免旧数据被误当作几何监督训练。
+
+  已完成的 TAL class/box/DFL/mask 同索引链保持 COMPILE_PASS；真实训练的下一步应是由现有几何资产打包器生成新
+  的 cxvision.yolov8n_aabb_mask_package.v1 完整包，再执行 T0 预检和低 epoch headless 实训。
+
+  后续按“数量 → 类别 → 精度 → 准入”的固定闭环推进：
+1. 完成本轮 NMS 候选评估
+   固定验证、扰动稳定性、冻结消融全部结束后，先核验：
+   - 单目标平均输出数、最大输出数、重复率；
+   - 跨类重复是否被 class-agnostic NMS 消除；
+   - max=20 是否只是截断，而非真实抑制。
+2. 数量契约自动整定
+   若仍多框，按预定义策略逐轮执行、每轮留证据：
+   - 置信度阈值步进；
+   - NMS IoU 步进；
+   - 最大检测数仅作安全上限，不作为“数量正确”的伪修复；
+   - 验证集没有收益即回退，切换策略。
+3. 分类混淆修复
+   数量收敛后，按七类混淆矩阵识别问题类：
+   - 加入误报框、近似边界、困难负样本；
+   - 类别均衡采样与 focal/quality-target 参数自整定；
+   - 只微调分类头，必要时再解冻 Neck；不先动 Backbone。
+4. 数据与训练策略自整定
+   根据样本规模、类别覆盖、漏检/误检类型动态确定：
+   - 边界模糊、断裂、缺口、旋转、缩放、颜色变化等增强强度；
+   - 小样本增强倍率、困难样本回灌比例；
+   - 学习率、早停、冻结层级、训练 epoch 与损失权重。
+     每轮参数、样本来源、收益、回退原因全部归档。
+5. 几何 V2 独立增强
+   保持 V1 作为可回滚成熟基线，另建 V2：
+   - Geometry Regression Head；
+   - primitive type、中心、尺度、sin/cos 角度、质量与不确定性；
+   - TAL 正样本索引同步到 mask、boundary、geometry；
+   - Geometry/Boundary/Consistency loss。
+     未完成前不得把传统轮廓拟合结果称为 learned geometry head。
+6. 生产准入
+   依次形成：
+   - TRAINING_READY：数据、ROI、标签、摘要完整；
+   - CANDIDATE：真实训练、权重哈希、父模型迁移回执完整；
+   - EVALUATED：固定验证、困难样本、留存集、稳定性完成；
+   - APPROVED：数量/类别/精度指标达标且无不可控退化；
+   - ACTIVE：仅在业务人工批准后允许外部推理。
+当前正在第 1 步。本轮结果决定第 2 步的具体自整定参数包；在单目标输出未接近 1、且缺少 holdout 前，状态不得超过 CANDIDATE / EVALUATED_PENDING。

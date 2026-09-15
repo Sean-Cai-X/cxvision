@@ -19,15 +19,15 @@ namespace
 {
 bool FastMatchScriptSupportsNormalTrace(const std::string& scriptText)
 {
-  return scriptText.find("fastmatch_normal_trace_binding_version: 2") !=
+  return scriptText.find("fastmatch_normal_trace_binding_version: 3") !=
              std::string::npos &&
          scriptText.find("setnormaltraceenabled") != std::string::npos &&
          scriptText.find("setnormaltraceparams") != std::string::npos &&
          scriptText.find("setnormaltracedomain") != std::string::npos &&
+         scriptText.find("setnormaltracejunction") != std::string::npos &&
          scriptText.find("setnormaltraceknn") != std::string::npos &&
          scriptText.find("setnormaltraceann") != std::string::npos;
 }
-
 std::string NewFastMatchBindingUpgradeCandidateId()
 {
   const auto now = std::chrono::system_clock::now();

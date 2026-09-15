@@ -209,6 +209,10 @@ struct CxScriptToolResultCapture
     int fastmatch_rotate_elapsed_ms = 0;
 
     CxFastMatchNormalTraceEvidence fastmatch_normal_trace;
+    CxFastMatchShapeModel fastmatch_reference_shape_model;
+    CxFastMatchShapeModel fastmatch_observed_shape_model;
+    CxFastMatchFormFitResult fastmatch_form_fit;
+    cxcore::formfit::FormfitGauge fastmatch_form_fit_gauge;
 
     CxFastMatchTemplateGeometryEvidence fastmatch_template_geometry;
     std::vector<CxFastMatchPoseCandidateEvidence> fastmatch_pose_candidates;

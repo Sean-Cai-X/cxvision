@@ -2,6 +2,7 @@
 #define CXCORE_CORE_FORMFITGAUGE_H
 
 #include "CxCoreBoundary.h"
+#include "CxFastMatchShapeModel.h"
 #include "FormfitFitMethod.h"
 
 #include <string>
@@ -140,6 +141,20 @@ FormfitGauge MakeCircleRingLineGauge(
     const char* name,
     double center_tolerance = 3.0,
     double thickness_tolerance = 5.0);
+// P6 bridge: FastMatch owns contour reconstruction and bidirectional form-fit.
+// FormfitGauge receives only a value snapshot for business composition and
+// constraint analysis; it never owns or reruns the matching algorithm.
+GaugeElement MakeFastMatchFormFitGaugeElement(
+    const CxFastMatchFormFitResult& fit_result,
+    const CxFastMatchShapeModel& observed_model,
+    const char* element_id,
+    const char* source_entity_id);
+FormfitGauge MakeFastMatchFormFitGauge(
+    const CxFastMatchFormFitResult& fit_result,
+    const CxFastMatchShapeModel& reference_model,
+    const CxFastMatchShapeModel& observed_model,
+    const char* gauge_id,
+    const char* name);
 FitTaskSpec MakeTaskSpecFromGauge(const FormfitGauge& gauge, const char* task_id, FitTaskType task_type);
 FitProblem MakeFitProblemFromGauge(const FormfitGauge& gauge, const char* problem_id);
 

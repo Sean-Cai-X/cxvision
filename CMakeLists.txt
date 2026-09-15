@@ -90,7 +90,8 @@ set(CXIMAGE_CORE_SOURCES
   cximage/FindSegmentationOpenCvSmokeBackend.cpp
   cximage/FindSegmentationEdgeSamBackend.cpp
   cximage/FindObject.cpp
-  cximage/FastMatch.cpp
+    cximage/FastMatch.cpp
+    cximage/CxFastMatchShapeModel.cpp
   cximage/CxTextInspect.cpp
   cximage/FastMatchPolicy.cpp
   cximage/FastMatchGridClassAdapter.cpp

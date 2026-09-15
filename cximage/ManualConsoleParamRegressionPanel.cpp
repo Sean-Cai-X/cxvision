@@ -3326,7 +3326,7 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   InjectManualGaugeInt(context, "global_hgap", gauge.hgap);
   InjectManualGaugeInt(context, "global_filterprofile", gauge.filterprofile);
 
-  int shared = RuntimeIntOr(context, "global_fastmatch_learn_shared", 1);
+  int shared = RuntimeIntOr(context, "global_fastmatch_learn_shared", 0);
   shared = shared != 0 ? 1 : 0;
   bool sharedBool = shared != 0;
   const bool sharedModeChanged = ImGui::Checkbox(
@@ -3389,13 +3389,14 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
     // Top/Bottom scan horizontal bodies and Left/Right scan vertical bodies.
     shared = 0;
     InjectManualGaugeInt(context, "global_fastmatch_learn_shared", 0);
+    const int oppositeMethod = std::clamp(gauge.method ^ 1, 0, 3);
     seedDirection(0, gauge.threshold, gauge.method, gauge.linegap, 8, 2,
                   sharedObjfilter, sharedCompareGap);
-    seedDirection(1, gauge.threshold, gauge.method, gauge.linegap, 8, 2,
+    seedDirection(1, gauge.threshold, oppositeMethod, gauge.linegap, 8, 2,
                   sharedObjfilter, sharedCompareGap);
     seedDirection(2, gauge.threshold, gauge.method, gauge.linegap, 2, 8,
                   sharedObjfilter, sharedCompareGap);
-    seedDirection(3, gauge.threshold, gauge.method, gauge.linegap, 2, 8,
+    seedDirection(3, gauge.threshold, oppositeMethod, gauge.linegap, 2, 8,
                   sharedObjfilter, sharedCompareGap);
     for (int dir = 0; dir < 4; ++dir) {
       const std::string suffix = "_" + std::to_string(dir);
@@ -3567,6 +3568,81 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
     ImGui::EndTabBar();
   }
   ImGui::Unindent(12.0f);
+  }
+  if (ImGui::CollapsingHeader(
+          "FastMatch Shape Model / FormfitGauge Bridge (P0-P6)",
+          ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Indent(12.0f);
+    bool formFitEnabled =
+        RuntimeIntOr(context, "global_fastmatch_formfit_enabled", 0) != 0;
+    if (ImGui::Checkbox("Enable dense bidirectional form-fit", &formFitEnabled)) {
+      InjectManualGaugeInt(context, "global_fastmatch_formfit_enabled",
+                           formFitEnabled ? 1 : 0);
+      edited = true;
+    }
+    const bool scriptSupportsFormFit =
+        context.editor_text.find("fastmatch_form_fit_binding_version: 1") !=
+            std::string::npos &&
+        context.editor_text.find("setformfitdenseparams") != std::string::npos &&
+        context.editor_text.find("setformfitannparams") != std::string::npos;
+    if (formFitEnabled && !scriptSupportsFormFit) {
+      ImGui::TextColored(ImVec4(1.0f, 0.43f, 0.35f, 1.0f),
+                         "SCRIPT_BINDING_STALE: create a compatible run before Learn.");
+    }
+    ImGui::TextDisabled(
+        "FastMatch owns sparse conclusions, dense contour reconstruction and "
+        "bidirectional correspondence. FormfitGauge receives a value-only "
+        "PointSet/constraint snapshot; it does not rerun matching.");
+
+    ImGui::SeparatorText("Dense contour and sub-pixel profile");
+    edited |= DrawRuntimeIntRow(context, "dense sample step milli-px",
+        "global_fastmatch_formfit_dense_step_milli_px", 1000, 100, 10000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "normal profile half-width milli-px",
+        "global_fastmatch_formfit_profile_half_width_milli_px", 2500, 250, 20000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "normal profile step milli-px",
+        "global_fastmatch_formfit_profile_step_milli_px", 250, 50, 5000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "profile minimum gradient",
+        "global_fastmatch_formfit_min_gradient", 4, 0, 255, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "curvature anchor threshold milli-deg",
+        "global_fastmatch_formfit_curvature_threshold_millideg", 12000, 100, 180000, 270.0f);
+
+    ImGui::SeparatorText("Bidirectional ANN correspondence");
+    edited |= DrawRuntimeIntRow(context, "ANN search radius milli-px",
+        "global_fastmatch_formfit_ann_radius_milli_px", 8000, 250, 100000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "normal compatibility tolerance deg",
+        "global_fastmatch_formfit_normal_tolerance_deg", 35, 1, 90, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "residual trim percent",
+        "global_fastmatch_formfit_trim_percent", 20, 0, 80, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "minimum mutual pairs",
+        "global_fastmatch_formfit_min_mutual_pairs", 6, 2, 100000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "maximum refinement iterations",
+        "global_fastmatch_formfit_max_iterations", 8, 1, 100, 270.0f);
+
+    ImGui::SeparatorText("Budget and transform model");
+    edited |= DrawRuntimeIntRow(context, "maximum elapsed ms",
+        "global_fastmatch_formfit_max_elapsed_ms", 80, 1, 60000, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "maximum structural anchors",
+        "global_fastmatch_formfit_max_anchors", 64, 4, 4096, 270.0f);
+    edited |= DrawRuntimeIntRow(context, "allow non-uniform affine",
+        "global_fastmatch_formfit_allow_affine", 1, 0, 1, 270.0f);
+    ImGui::TextDisabled(
+        "Robust defaults are intended to work without tuning. Manual controls "
+        "are for low-contrast, curved, occluded or strongly anisotropic cases.");
+
+    ImGui::SeparatorText("Last run evidence");
+    ImGui::Text("status=%d reference=%d observed=%d mutual=%d anchors=%d",
+        RuntimeIntOr(context, "global_fastmatch_formfit_status_code", 0),
+        RuntimeIntOr(context, "global_fastmatch_formfit_reference_count", 0),
+        RuntimeIntOr(context, "global_fastmatch_formfit_observed_count", 0),
+        RuntimeIntOr(context, "global_fastmatch_formfit_mutual_count", 0),
+        RuntimeIntOr(context, "global_fastmatch_formfit_anchor_count", 0));
+    ImGui::Text("score=%.3f symmetric residual=%.3f px",
+        RuntimeIntOr(context, "global_fastmatch_formfit_score_permille", 0) / 1000.0,
+        RuntimeIntOr(context, "global_fastmatch_formfit_residual_milli_px", -1000) / 1000.0);
+    ImGui::TextDisabled(
+        "Evidence files: shape_model.json, formfit_correspondence.json and "
+        "formfit_gauge.json. All overlays are render-only.");
+    ImGui::Unindent(12.0f);
   }
   return edited;
 }
@@ -3813,11 +3889,16 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_anchor_radius_px", 24, 4, 256, 250.0f);
   edited |= DrawRuntimeIntRow(context, "local XY compression bin px",
       "global_fastmatch_normaltrace_xy_compression_bin_px", 4, 1, 64, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "minimum keypoints per direction",
+  edited |= DrawRuntimeIntRow(context,
+      "source-point gate: minimum valid keypoints per direction",
       "global_fastmatch_normaltrace_min_keypoints_per_domain", 4, 2, 256, 250.0f);
   ImGui::TextDisabled(
       "Each de-duplication/XY bucket keeps one medoid that is an existing "
       "FindLine conclusion; no averaged coordinate is created.");
+  ImGui::TextDisabled(
+      "If any direction is below this gate, ANN/Dijkstra and Normal A/B pairing "
+      "stop. FastMatch may use its explicit compatibility fallback, but sparse "
+      "evidence is never padded or forced into a trace.");
   ImGui::SeparatorText("Derived Junction Reconstruction");
   edited |= DrawRuntimeIntRow(context, "endpoint spike ratio % of median gap",
       "global_fastmatch_normaltrace_endpoint_spike_ratio_percent", 250, 110, 1000, 250.0f);

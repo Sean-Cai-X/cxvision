@@ -1322,7 +1322,20 @@ bool InjectCxScriptRuntimeStrings(
                       << ",\"dfl_loss_weight\":"
                       << options.torch_dfl_loss_weight
                       << ",\"mask_loss_weight\":"
-                      << options.torch_mask_loss_weight << "}";
+                      << options.torch_mask_loss_weight
+                      << ",\"use_assignment_quality_targets\":"
+                      << (options.torch_use_assignment_quality_targets ? 1 : 0)
+                      << ",\"assignment_quality_warmup_epochs\":"
+                      << options.torch_assignment_quality_warmup_epochs
+                      << ",\"postprocess_confidence_threshold\":"
+                      << options.torch_postprocess_confidence_threshold
+                      << ",\"postprocess_iou_threshold\":"
+                      << options.torch_postprocess_iou_threshold
+                      << ",\"postprocess_max_detections\":"
+                      << options.torch_postprocess_max_detections
+                      << ",\"postprocess_class_agnostic_nms\":"
+                      << (options.torch_postprocess_class_agnostic_nms ? 1 : 0)
+                      << "}";
         const std::string request_context = case_id + separator +
             options.image_path + separator + options.output_dir + separator +
             torch_context.str() +
@@ -1795,6 +1808,46 @@ CxScriptResultPackage BuildCxScriptResultPackage(
     pkg.facts["fastmatch_normal_trace_polarity_source"] =
         "directional_findline_domain";
     pkg.facts["fastmatch_normal_trace_image_reprocessing"] = "false";
+    pkg.facts["fastmatch_form_fit_status"] =
+        capture.fastmatch_form_fit.status;
+    pkg.facts["fastmatch_form_fit_failure_stage"] =
+        capture.fastmatch_form_fit.failure_stage;
+    pkg.facts["fastmatch_form_fit_reference_model"] =
+        capture.fastmatch_form_fit.reference_model_id;
+    pkg.facts["fastmatch_form_fit_observed_model"] =
+        capture.fastmatch_form_fit.observed_model_id;
+    pkg.facts["fastmatch_form_fit_gauge_id"] =
+        capture.fastmatch_form_fit_gauge.gauge_id;
+    pkg.metrics["fastmatch_form_fit_reference_sparse_count"] =
+        capture.fastmatch_form_fit.reference_sparse_count;
+    pkg.metrics["fastmatch_form_fit_reference_dense_count"] =
+        capture.fastmatch_form_fit.reference_dense_count;
+    pkg.metrics["fastmatch_form_fit_observed_dense_count"] =
+        capture.fastmatch_form_fit.observed_dense_count;
+    pkg.metrics["fastmatch_form_fit_subpixel_point_count"] =
+        capture.fastmatch_reference_shape_model.subpixel_point_count;
+    pkg.metrics["fastmatch_form_fit_structural_anchor_count"] =
+        capture.fastmatch_form_fit.structural_anchor_count;
+    pkg.metrics["fastmatch_form_fit_mutual_count"] =
+        capture.fastmatch_form_fit.dense_mutual_count;
+    pkg.metrics["fastmatch_form_fit_forward_coverage"] =
+        capture.fastmatch_form_fit.forward_coverage;
+    pkg.metrics["fastmatch_form_fit_reverse_coverage"] =
+        capture.fastmatch_form_fit.reverse_coverage;
+    pkg.metrics["fastmatch_form_fit_mutual_coverage"] =
+        capture.fastmatch_form_fit.mutual_coverage;
+    pkg.metrics["fastmatch_form_fit_symmetric_residual_px"] =
+        capture.fastmatch_form_fit.symmetric_residual_px;
+    pkg.metrics["fastmatch_form_fit_normal_residual_deg"] =
+        capture.fastmatch_form_fit.normal_residual_deg;
+    pkg.metrics["fastmatch_form_fit_score"] =
+        capture.fastmatch_form_fit.score;
+    pkg.metrics["fastmatch_form_fit_elapsed_ms"] =
+        capture.fastmatch_form_fit.elapsed_ms;
+    pkg.metrics["fastmatch_form_fit_gauge_element_count"] =
+        static_cast<double>(capture.fastmatch_form_fit_gauge.elements.size());
+    pkg.metrics["fastmatch_form_fit_gauge_constraint_count"] =
+        static_cast<double>(capture.fastmatch_form_fit_gauge.constraints.size());
     pkg.metrics["candidate_count"] = capture.candidate_count;
     pkg.metrics["best_score"] = capture.best_score;
     pkg.metrics["rendered_measure_points_count"] = capture.rendered_measure_points_count;
@@ -2662,6 +2715,18 @@ bool ParseCxScriptHeadlessArgs(
             options.torch_dfl_loss_weight = std::stod(argv[++i]);
         else if (arg == "--torch-mask-loss-weight" && i + 1 < argc)
             options.torch_mask_loss_weight = std::stod(argv[++i]);
+        else if (arg == "--torch-use-assignment-quality-targets" && i + 1 < argc)
+            options.torch_use_assignment_quality_targets = std::stoi(argv[++i]) != 0;
+        else if (arg == "--torch-assignment-quality-warmup-epochs" && i + 1 < argc)
+            options.torch_assignment_quality_warmup_epochs = std::stoi(argv[++i]);
+        else if (arg == "--torch-postprocess-confidence-threshold" && i + 1 < argc)
+            options.torch_postprocess_confidence_threshold = std::stod(argv[++i]);
+        else if (arg == "--torch-postprocess-iou-threshold" && i + 1 < argc)
+            options.torch_postprocess_iou_threshold = std::stod(argv[++i]);
+        else if (arg == "--torch-postprocess-max-detections" && i + 1 < argc)
+            options.torch_postprocess_max_detections = std::stoi(argv[++i]);
+        else if (arg == "--torch-postprocess-class-agnostic-nms" && i + 1 < argc)
+            options.torch_postprocess_class_agnostic_nms = std::stoi(argv[++i]) != 0;
         else if (arg == "--script" && i + 1 < argc)
             options.script_path = argv[++i];
         else if (arg == "--globals" && i + 1 < argc)
@@ -3077,6 +3142,9 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     std::filesystem::path evidence_overlay_path = output_dir / "evidence_overlay.png";
     std::filesystem::path tool_display_path = output_dir / "tool_display.png";
     std::filesystem::path line_trace_path = output_dir / "line_trace.json";
+    std::filesystem::path shape_model_path = output_dir / "shape_model.json";
+    std::filesystem::path form_fit_path = output_dir / "formfit_correspondence.json";
+    std::filesystem::path form_fit_gauge_path = output_dir / "formfit_gauge.json";
     std::filesystem::path variable_snapshot_path = output_dir / "variable_snapshot.json";
     std::filesystem::path object_state_path = output_dir / "object_state.json";
     std::filesystem::path findobject_branch_evidence_path = output_dir / "findobject_branch_evidence.json";
@@ -3115,6 +3183,27 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             return cv::Point(static_cast<int>(std::lround(point.x)),
                              static_cast<int>(std::lround(point.y)));
         };
+        // Always render the last valid FindLine measurement facts.  These
+        // remain meaningful when slope/domain filtering rejects every anchor
+        // and no domain, ANN component, Dijkstra trace, or A/B pair exists.
+        const cv::Scalar anchor_colors[4] = {
+            cv::Scalar(0, 255, 255),   // Top: yellow
+            cv::Scalar(0, 165, 255),   // Bottom: orange
+            cv::Scalar(255, 0, 255),   // Left: magenta
+            cv::Scalar(255, 180, 0)};  // Right: cyan-blue
+        for (std::size_t direction = 0;
+             direction < capture.fastmatch_normal_trace
+                             .anchor_points_by_direction.size();
+             ++direction)
+        {
+            for (const auto& point : capture.fastmatch_normal_trace
+                                         .anchor_points_by_direction[direction])
+            {
+                cv::drawMarker(canvas, to_point(point),
+                               anchor_colors[direction],
+                               cv::MARKER_CROSS, 9, 2, cv::LINE_AA);
+            }
+        }
         std::vector<cv::Point> derived;
         derived.reserve(capture.fastmatch_normal_trace.derived_trace_points.size());
         for (const auto& point : capture.fastmatch_normal_trace.derived_trace_points)
@@ -3147,8 +3236,44 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             cv::circle(canvas, b, 3, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
         }
         cv::putText(canvas,
-                    "source=yellow derived=cyan junction=orange A=red B=green",
+                    "anchors: top=yellow bottom=orange left=magenta right=blue",
                     cv::Point(8, 18), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                    cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+        cv::putText(canvas,
+                    "trace=cyan junction=orange A=red B=green",
+                    cv::Point(8, 36), cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                    cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+    };
+    const auto render_form_fit_evidence = [&capture](cv::Mat& canvas)
+    {
+        if (canvas.empty() || !capture.fastmatch_form_fit.executed)
+            return;
+        const auto point = [](const CxFastMatchShapePoint& value) {
+            return cv::Point(static_cast<int>(std::lround(value.x)),
+                             static_cast<int>(std::lround(value.y)));
+        };
+        std::vector<cv::Point> reference;
+        reference.reserve(capture.fastmatch_reference_shape_model.dense_points.size());
+        for (const auto& value : capture.fastmatch_reference_shape_model.dense_points)
+            reference.push_back(point(value));
+        if (reference.size() >= 2)
+            cv::polylines(canvas, reference, true, cv::Scalar(255, 180, 0), 1,
+                          cv::LINE_AA);
+        std::vector<cv::Point> observed;
+        observed.reserve(capture.fastmatch_observed_shape_model.dense_points.size());
+        for (const auto& value : capture.fastmatch_observed_shape_model.dense_points)
+            observed.push_back(point(value));
+        if (observed.size() >= 2)
+            cv::polylines(canvas, observed, true, cv::Scalar(180, 0, 255), 1,
+                          cv::LINE_AA);
+        for (const auto& anchor : capture.fastmatch_reference_shape_model.anchors)
+            cv::circle(canvas,
+                       cv::Point(static_cast<int>(std::lround(anchor.x)),
+                                 static_cast<int>(std::lround(anchor.y))),
+                       4, cv::Scalar(0, 128, 255), 1, cv::LINE_AA);
+        cv::putText(canvas,
+                    "FormFit reference=blue observed=magenta anchors=orange",
+                    cv::Point(8, 36), cv::FONT_HERSHEY_SIMPLEX, 0.42,
                     cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
     };
 
@@ -3165,6 +3290,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::EVIDENCE, evidence_overlay, render_result))
     {
         render_normal_trace_evidence(evidence_overlay);
+        render_form_fit_evidence(evidence_overlay);
         std::filesystem::create_directories(evidence_overlay_path.parent_path());
         if (cv::imwrite(evidence_overlay_path.string(), evidence_overlay))
             result.evidence_overlay_path = evidence_overlay_path.string();
@@ -3173,6 +3299,7 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
     if (RenderCxShapeOverlay(source_image, capture.shapes, CxOverlayLayer::TOOL_DISPLAY, tool_display, render_result))
     {
         render_normal_trace_evidence(tool_display);
+        render_form_fit_evidence(tool_display);
         std::filesystem::create_directories(tool_display_path.parent_path());
         if (cv::imwrite(tool_display_path.string(), tool_display))
             result.tool_display_path = tool_display_path.string();
@@ -3252,6 +3379,27 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
                 if (i != 0)
                     line_trace_file << ",";
                 line_trace_file << values[i];
+            }
+            line_trace_file << "],\n";
+        };
+        const auto write_direction_point_arrays = [&line_trace_file](
+            const char* name,
+            const std::array<std::vector<CxFastMatchNormalTracePointEvidence>, 4>&
+                values) {
+            line_trace_file << "  \"" << name << "\": [";
+            for (std::size_t direction = 0; direction < values.size(); ++direction)
+            {
+                if (direction != 0)
+                    line_trace_file << ",";
+                line_trace_file << "[";
+                for (std::size_t index = 0; index < values[direction].size(); ++index)
+                {
+                    if (index != 0)
+                        line_trace_file << ",";
+                    line_trace_file << "[" << values[direction][index].x << ","
+                                    << values[direction][index].y << "]";
+                }
+                line_trace_file << "]";
             }
             line_trace_file << "],\n";
         };
@@ -3349,6 +3497,14 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             capture.fastmatch_normal_trace.derived_junction_current_extrapolation_px);
         write_double4("derived_junction_next_extrapolation_px",
             capture.fastmatch_normal_trace.derived_junction_next_extrapolation_px);
+        write_direction_point_arrays("anchor_points_by_direction",
+            capture.fastmatch_normal_trace.anchor_points_by_direction);
+        write_direction_point_arrays("domain_points_by_direction",
+            capture.fastmatch_normal_trace.domain_points_by_direction);
+        write_direction_point_arrays("compressed_points_by_direction",
+            capture.fastmatch_normal_trace.compressed_points_by_direction);
+        write_direction_point_arrays("ann_selected_points_by_direction",
+            capture.fastmatch_normal_trace.ann_selected_points_by_direction);
         write_point_array("derived_junction_points",
             capture.fastmatch_normal_trace.derived_junction_points, true);
         write_point_array("dijkstra_trace_points",
@@ -3373,6 +3529,146 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
             << "\"directional_findline_domain\"\n";
         line_trace_file << "}\n";
         line_trace_file.close();
+    }
+
+    const auto write_shape_model = [](std::ofstream& file, const char* key,
+                                      const CxFastMatchShapeModel& model,
+                                      bool trailing_comma) {
+        file << "  \"" << key << "\": {\n"
+             << "    \"model_id\": \"" << JsonEscape(model.model_id) << "\",\n"
+             << "    \"status\": \"" << JsonEscape(model.status) << "\",\n"
+             << "    \"available\": " << (model.available ? "true" : "false") << ",\n"
+             << "    \"closed\": " << (model.closed ? "true" : "false") << ",\n"
+             << "    \"source_conclusion_count\": " << model.source_conclusion_count << ",\n"
+             << "    \"derived_point_count\": " << model.derived_point_count << ",\n"
+             << "    \"subpixel_point_count\": " << model.subpixel_point_count << ",\n"
+             << "    \"bbox\": [" << model.bbox_x << "," << model.bbox_y << ","
+             << model.bbox_width << "," << model.bbox_height << "],\n"
+             << "    \"centroid\": [" << model.centroid_x << "," << model.centroid_y << "],\n"
+             << "    \"sparse_points\": [";
+        for (std::size_t index = 0; index < model.sparse_points.size(); ++index) {
+            if (index) file << ",";
+            const auto& point = model.sparse_points[index];
+            file << "{\"x\":" << point.x << ",\"y\":" << point.y
+                 << ",\"nx\":" << point.normal_x << ",\"ny\":" << point.normal_y
+                 << ",\"direction\":" << point.source_direction
+                 << ",\"scan\":" << point.source_scan
+                 << ",\"polarity\":" << point.polarity << "}";
+        }
+        file << "],\n    \"dense_points\": [";
+        for (std::size_t index = 0; index < model.dense_points.size(); ++index) {
+            if (index) file << ",";
+            const auto& point = model.dense_points[index];
+            file << "{\"x\":" << point.x << ",\"y\":" << point.y
+                 << ",\"nx\":" << point.normal_x << ",\"ny\":" << point.normal_y
+                 << ",\"curvature\":" << point.curvature
+                 << ",\"gradient\":" << point.gradient_magnitude
+                 << ",\"confidence\":" << point.confidence << "}";
+        }
+        file << "],\n    \"anchors\": [";
+        for (std::size_t index = 0; index < model.anchors.size(); ++index) {
+            if (index) file << ",";
+            const auto& anchor = model.anchors[index];
+            file << "{\"type\":\""
+                 << CxFastMatchStructuralAnchorTypeName(anchor.type)
+                 << "\",\"point_index\":" << anchor.point_index
+                 << ",\"x\":" << anchor.x << ",\"y\":" << anchor.y
+                 << ",\"strength\":" << anchor.strength
+                 << ",\"source\":\"" << JsonEscape(anchor.source) << "\"}";
+        }
+        file << "]\n  }" << (trailing_comma ? "," : "") << "\n";
+    };
+    std::ofstream shape_model_file(shape_model_path);
+    if (shape_model_file.is_open()) {
+        shape_model_file << "{\n";
+        write_shape_model(shape_model_file, "reference",
+                          capture.fastmatch_reference_shape_model, true);
+        write_shape_model(shape_model_file, "observed",
+                          capture.fastmatch_observed_shape_model, false);
+        shape_model_file << "}\n";
+    }
+
+    std::ofstream form_fit_file(form_fit_path);
+    if (form_fit_file.is_open()) {
+        const auto& fit = capture.fastmatch_form_fit;
+        form_fit_file << "{\n"
+            << "  \"executed\": " << (fit.executed ? "true" : "false") << ",\n"
+            << "  \"succeeded\": " << (fit.succeeded ? "true" : "false") << ",\n"
+            << "  \"budget_exceeded\": " << (fit.budget_exceeded ? "true" : "false") << ",\n"
+            << "  \"status\": \"" << JsonEscape(fit.status) << "\",\n"
+            << "  \"failure_stage\": \"" << JsonEscape(fit.failure_stage) << "\",\n"
+            << "  \"counts\": {\"reference_sparse\":" << fit.reference_sparse_count
+            << ",\"observed_sparse\":" << fit.observed_sparse_count
+            << ",\"reference_dense\":" << fit.reference_dense_count
+            << ",\"observed_dense\":" << fit.observed_dense_count
+            << ",\"mutual\":" << fit.dense_mutual_count << "},\n"
+            << "  \"coverage\": {\"forward\":" << fit.forward_coverage
+            << ",\"reverse\":" << fit.reverse_coverage
+            << ",\"mutual\":" << fit.mutual_coverage << "},\n"
+            << "  \"residual\": {\"mean_px\":" << fit.mean_residual_px
+            << ",\"max_px\":" << fit.max_residual_px
+            << ",\"symmetric_px\":" << fit.symmetric_residual_px
+            << ",\"normal_deg\":" << fit.normal_residual_deg << "},\n"
+            << "  \"affine\": [" << fit.affine_a << "," << fit.affine_b << ","
+            << fit.translate_x << "," << fit.affine_c << "," << fit.affine_d
+            << "," << fit.translate_y << "],\n"
+            << "  \"score\": " << fit.score << ",\n"
+            << "  \"elapsed_ms\": " << fit.elapsed_ms << ",\n"
+            << "  \"correspondences\": [";
+        for (std::size_t index = 0; index < fit.correspondences.size(); ++index) {
+            if (index) form_fit_file << ",";
+            const auto& pair = fit.correspondences[index];
+            form_fit_file << "{\"reference_index\":" << pair.reference_index
+                << ",\"observed_index\":" << pair.observed_index
+                << ",\"distance_px\":" << pair.distance_px
+                << ",\"normal_delta_deg\":" << pair.normal_delta_deg
+                << ",\"weight\":" << pair.weight
+                << ",\"mutual\":" << (pair.mutual ? "true" : "false")
+                << ",\"accepted\":" << (pair.accepted ? "true" : "false") << "}";
+        }
+        form_fit_file << "]\n}\n";
+    }
+
+    std::ofstream gauge_file(form_fit_gauge_path);
+    if (gauge_file.is_open()) {
+        const auto& gauge = capture.fastmatch_form_fit_gauge;
+        gauge_file << "{\n  \"gauge_id\": \"" << JsonEscape(gauge.gauge_id)
+                   << "\",\n  \"name\": \"" << JsonEscape(gauge.name)
+                   << "\",\n  \"learn_score\": " << gauge.learn_score
+                   << ",\n  \"elements\": [";
+        for (std::size_t index = 0; index < gauge.elements.size(); ++index) {
+            if (index) gauge_file << ",";
+            const auto& element = gauge.elements[index];
+            gauge_file << "{\"element_id\":\"" << JsonEscape(element.element_id)
+                       << "\",\"type\":\""
+                       << cxcore::formfit::GaugeElementTypeName(element.element_type)
+                       << "\",\"source\":\"" << JsonEscape(element.source_entity_id)
+                       << "\",\"confidence\":" << element.confidence
+                       << ",\"bbox\":[" << element.bbox_x << "," << element.bbox_y
+                       << "," << element.bbox_width << "," << element.bbox_height
+                       << "],\"variables\":[";
+            for (std::size_t variable_index = 0;
+                 variable_index < element.variables.size(); ++variable_index) {
+                if (variable_index) gauge_file << ",";
+                const auto& variable = element.variables[variable_index];
+                gauge_file << "{\"name\":\"" << JsonEscape(variable.name)
+                           << "\",\"value\":" << variable.value << "}";
+            }
+            gauge_file << "]}";
+        }
+        gauge_file << "],\n  \"constraints\": [";
+        for (std::size_t index = 0; index < gauge.constraints.size(); ++index) {
+            if (index) gauge_file << ",";
+            const auto& constraint = gauge.constraints[index];
+            gauge_file << "{\"constraint_id\":\""
+                       << JsonEscape(constraint.constraint_id)
+                       << "\",\"type\":\""
+                       << cxcore::formfit::GaugeConstraintTypeName(
+                              constraint.constraint_type)
+                       << "\",\"target\":" << constraint.target_value
+                       << ",\"tolerance\":" << constraint.tolerance << "}";
+        }
+        gauge_file << "]\n}\n";
     }
 
     const std::map<std::string, double> parameter_snapshot =

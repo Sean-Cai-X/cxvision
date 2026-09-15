@@ -4,6 +4,7 @@
 #include "torch_runtime_task_types.h"
 #include "torch_segmentation_evidence.h"
 #include "torch_yolov8_seg.h"
+#include "torch_taskalignedassigner.h"
 
 #include <algorithm>
 #include <array>
@@ -52,7 +53,173 @@ struct YoloV8SegDatasetSample
     std::vector<std::array<float, 4>> boxes_xyxy_norm;
     std::vector<std::vector<cv::Point2f>> polygons_norm;
     std::vector<int64_t> classes;
+    std::string target_mask_ref;
+    std::string geometry_facts_ref;
+    std::string training_target_ref;
+    std::string metrology_target_ref;
+    std::string boundary_map_ref;
+    std::string geometry_type;
+    std::string package_geometry_type;
+    // Source-pixel geometry facts.  The valid mask is the contract: a missing
+    // fact must stay missing instead of being guessed from the segmentation box.
+    int geometry_primitive_type = -1;
+    std::array<float, 6> geometry_target_values{};
+    std::array<uint8_t, 6> geometry_target_valid{};
 };
+
+constexpr int kGeometryTargetValueCount = 6;
+constexpr int kGeometryCenterX = 0;
+constexpr int kGeometryCenterY = 1;
+constexpr int kGeometryEnvelopeWidth = 2;
+constexpr int kGeometryEnvelopeHeight = 3;
+constexpr int kGeometrySinAngle = 4;
+constexpr int kGeometryCosAngle = 5;
+
+struct GeometryTargetTensors
+{
+    torch::Tensor primitive_type;
+    torch::Tensor values;
+    torch::Tensor valid_mask;
+    bool primitive_type_valid = false;
+};
+
+struct SegTaskAlignedAnchorTable
+{
+    torch::Tensor class_logits;
+    torch::Tensor dfl_logits;
+    torch::Tensor mask_coefficients;
+    torch::Tensor decoded_boxes;
+    torch::Tensor centers_xy;
+    torch::Tensor grid_widths;
+    torch::Tensor grid_heights;
+};
+
+SegTaskAlignedAnchorTable BuildSegTaskAlignedAnchorTable(
+    const YoloV8SegRawOutput& raw,
+    const YoloV8Segment& model,
+    int input_width,
+    int input_height)
+{
+    std::vector<torch::Tensor> class_levels, dfl_levels, coefficient_levels;
+    std::vector<torch::Tensor> box_levels, center_levels, width_levels, height_levels;
+    for (std::size_t level = 0; level < raw.class_logits.size(); ++level)
+    {
+        const int64_t height = raw.class_logits[level].size(2);
+        const int64_t width = raw.class_logits[level].size(3);
+        const int64_t anchors = height * width;
+        const auto options = raw.class_logits[level].options();
+        const torch::Tensor xs = torch::arange(width, options).repeat({height});
+        const torch::Tensor ys = torch::arange(height, options).view({height, 1})
+            .repeat({1, width}).reshape({anchors});
+        const torch::Tensor center_x = (xs + 0.5f) / static_cast<float>(width);
+        const torch::Tensor center_y = (ys + 0.5f) / static_cast<float>(height);
+        const torch::Tensor dfl = model->head()->dfl_module()->expectation(
+            raw.box_logits[level].view({1, 64, anchors})).permute({0, 2, 1});
+        box_levels.push_back(torch::stack({
+            (center_x - dfl.select(2, 0) / static_cast<float>(width)).clamp(0.0, 1.0),
+            (center_y - dfl.select(2, 1) / static_cast<float>(height)).clamp(0.0, 1.0),
+            (center_x + dfl.select(2, 2) / static_cast<float>(width)).clamp(0.0, 1.0),
+            (center_y + dfl.select(2, 3) / static_cast<float>(height)).clamp(0.0, 1.0)}, 2));
+        class_levels.push_back(raw.class_logits[level].permute({0, 2, 3, 1})
+            .reshape({1, anchors, raw.class_logits[level].size(1)}));
+        dfl_levels.push_back(raw.box_logits[level].permute({0, 2, 3, 1})
+            .reshape({1, anchors, 64}));
+        coefficient_levels.push_back(raw.mask_coefficients[level].permute({0, 2, 3, 1})
+            .reshape({1, anchors, raw.mask_coefficients[level].size(1)}));
+        center_levels.push_back(torch::stack({center_x, center_y}, 1).unsqueeze(0));
+        width_levels.push_back(torch::full({1, anchors}, static_cast<float>(width), options));
+        height_levels.push_back(torch::full({1, anchors}, static_cast<float>(height), options));
+    }
+    return {torch::cat(class_levels, 1), torch::cat(dfl_levels, 1),
+        torch::cat(coefficient_levels, 1), torch::cat(box_levels, 1),
+        torch::cat(center_levels, 1), torch::cat(width_levels, 1),
+        torch::cat(height_levels, 1)};
+}
+
+int GeometryPrimitiveTypeFromName(const std::string& geometry_type)
+{
+    static const std::map<std::string, int> kTypes{
+        {"arc", 0}, {"circle", 1}, {"ellipse", 2}, {"line", 3},
+        {"open_curve", 4}, {"polygon", 5}, {"closed_curve", 6}};
+    const auto found = kTypes.find(geometry_type);
+    return found == kTypes.end() ? -1 : found->second;
+}
+
+bool ReadGeometryPoint(const cv::FileNode& node, float& x, float& y)
+{
+    if (!node.isSeq() || node.size() != 2)
+        return false;
+    node[0] >> x;
+    node[1] >> y;
+    return std::isfinite(x) && std::isfinite(y);
+}
+
+bool ReadGeometryAngle(const cv::FileNode& node, float& radians)
+{
+    double degrees = 0.0;
+    if (node.empty())
+        return false;
+    node >> degrees;
+    if (!std::isfinite(degrees))
+        return false;
+    radians = static_cast<float>(degrees * CV_PI / 180.0);
+    return true;
+}
+
+void SetGeometryOrientation(
+    YoloV8SegDatasetSample& sample,
+    float radians)
+{
+    sample.geometry_target_values[kGeometrySinAngle] = std::sin(radians);
+    sample.geometry_target_values[kGeometryCosAngle] = std::cos(radians);
+    sample.geometry_target_valid[kGeometrySinAngle] = 1;
+    sample.geometry_target_valid[kGeometryCosAngle] = 1;
+}
+
+GeometryTargetTensors BuildGeometryTargetTensors(
+    const YoloV8SegDatasetSample& sample,
+    const SegLetterbox& letterbox,
+    int input_width,
+    int input_height,
+    const torch::Device& device)
+{
+    std::array<float, kGeometryTargetValueCount> values =
+        sample.geometry_target_values;
+    const float input_width_f = static_cast<float>(input_width);
+    const float input_height_f = static_cast<float>(input_height);
+    // The first four values originate in source pixels.  Letterbox is applied
+    // here, once, so V2 geometry losses share the detector coordinate system.
+    if (sample.geometry_target_valid[kGeometryCenterX] != 0)
+        values[kGeometryCenterX] =
+            static_cast<float>((letterbox.pad_x +
+                values[kGeometryCenterX] * letterbox.scale) / input_width_f);
+    if (sample.geometry_target_valid[kGeometryCenterY] != 0)
+        values[kGeometryCenterY] =
+            static_cast<float>((letterbox.pad_y +
+                values[kGeometryCenterY] * letterbox.scale) / input_height_f);
+    if (sample.geometry_target_valid[kGeometryEnvelopeWidth] != 0)
+        values[kGeometryEnvelopeWidth] = static_cast<float>(
+            values[kGeometryEnvelopeWidth] * letterbox.scale / input_width_f);
+    if (sample.geometry_target_valid[kGeometryEnvelopeHeight] != 0)
+        values[kGeometryEnvelopeHeight] = static_cast<float>(
+            values[kGeometryEnvelopeHeight] * letterbox.scale / input_height_f);
+
+    GeometryTargetTensors result;
+    const auto float_options = torch::TensorOptions()
+        .dtype(torch::kFloat32).device(device);
+    result.values = torch::tensor(
+        std::vector<float>(values.begin(), values.end()), float_options);
+    std::array<float, kGeometryTargetValueCount> mask{};
+    for (int index = 0; index < kGeometryTargetValueCount; ++index)
+        mask[index] = sample.geometry_target_valid[index] == 0 ? 0.0f : 1.0f;
+    result.valid_mask = torch::tensor(
+        std::vector<float>(mask.begin(), mask.end()), float_options);
+    result.primitive_type = torch::tensor(
+        sample.geometry_primitive_type,
+        torch::TensorOptions().dtype(torch::kLong).device(device));
+    result.primitive_type_valid = sample.geometry_primitive_type >= 0;
+    return result;
+}
 
 std::string TrimDatasetText(std::string value)
 {
@@ -362,6 +529,195 @@ bool LoadExportedTorchDataset(
     return true;
 }
 
+bool LoadGeometryTargetPackage(
+    const std::filesystem::path& manifest_path,
+    std::vector<YoloV8SegDatasetSample>& samples,
+    std::string& reason)
+{
+    cv::FileStorage storage(manifest_path.string(), cv::FileStorage::READ);
+    if (!storage.isOpened() ||
+        static_cast<std::string>(storage["schema"]) !=
+            "cxvision.yolov8n_aabb_mask_package.v1")
+    {
+        reason = "unsupported geometry target package schema";
+        return false;
+    }
+    const cv::FileNode nodes = storage["samples"];
+    if (!nodes.isSeq() || nodes.empty())
+    {
+        reason = "geometry target package has no samples";
+        return false;
+    }
+    for (const cv::FileNode& node : nodes)
+    {
+        YoloV8SegDatasetSample sample;
+        std::string image_ref, label_ref;
+        node["split"] >> sample.split;
+        node["image"] >> image_ref;
+        node["label"] >> label_ref;
+        node["target_mask"] >> sample.target_mask_ref;
+        node["geometry_facts"] >> sample.geometry_facts_ref;
+        node["training_target"] >> sample.training_target_ref;
+        node["metrology_target"] >> sample.metrology_target_ref;
+        node["boundary_map"] >> sample.boundary_map_ref;
+        node["geometry_type"] >> sample.package_geometry_type;
+        sample.image_ref = ResolveDatasetPath(manifest_path, image_ref).string();
+        sample.target_mask_ref =
+            ResolveDatasetPath(manifest_path, sample.target_mask_ref).string();
+        sample.geometry_facts_ref =
+            ResolveDatasetPath(manifest_path, sample.geometry_facts_ref).string();
+        sample.training_target_ref =
+            ResolveDatasetPath(manifest_path, sample.training_target_ref).string();
+        sample.metrology_target_ref =
+            ResolveDatasetPath(manifest_path, sample.metrology_target_ref).string();
+        sample.boundary_map_ref =
+            ResolveDatasetPath(manifest_path, sample.boundary_map_ref).string();
+        if (!std::filesystem::is_regular_file(sample.image_ref) ||
+            !std::filesystem::is_regular_file(sample.target_mask_ref) ||
+            !std::filesystem::is_regular_file(sample.geometry_facts_ref) ||
+            !std::filesystem::is_regular_file(sample.training_target_ref) ||
+            !std::filesystem::is_regular_file(sample.metrology_target_ref) ||
+            !std::filesystem::is_regular_file(sample.boundary_map_ref))
+        {
+            reason = "geometry target package required asset missing";
+            return false;
+        }
+        cv::FileStorage metrology(sample.metrology_target_ref, cv::FileStorage::READ);
+        cv::FileStorage geometry(sample.geometry_facts_ref, cv::FileStorage::READ);
+        std::string geometry_type;
+        int training_eligible = 0;
+        int identifiable = 0;
+        if (!metrology.isOpened() || !geometry.isOpened() ||
+            static_cast<std::string>(metrology["schema"]) !=
+                "cxvision.metrology_target.v1" ||
+            static_cast<std::string>(geometry["schema"]) !=
+                "cxvision.geometry_augmented_facts.v1")
+        {
+            reason = "geometry target package target schema invalid";
+            return false;
+        }
+        metrology["training_eligible"] >> training_eligible;
+        metrology["identifiable"] >> identifiable;
+        geometry["geometry_type"] >> geometry_type;
+        const bool training_split = sample.split == "train";
+        if ((training_split && training_eligible == 0) ||
+            identifiable == 0 || geometry_type.empty())
+        {
+            reason = "geometry target package sample is not training eligible";
+            return false;
+        }
+        const std::string canonical_geometry_type =
+            sample.package_geometry_type.empty()
+                ? geometry_type : sample.package_geometry_type;
+        sample.geometry_primitive_type =
+            GeometryPrimitiveTypeFromName(canonical_geometry_type);
+        sample.geometry_type = canonical_geometry_type;
+        const cv::FileNode standard_position = geometry["standard_position"];
+        float center_x = 0.0f, center_y = 0.0f;
+        if (!ReadGeometryPoint(
+                standard_position["centroid_xy"], center_x, center_y))
+        {
+            reason = "geometry target package standard centroid invalid";
+            return false;
+        }
+        const cv::FileNode envelope = standard_position["bbox_xywh"];
+        if (!envelope.isSeq() || envelope.size() != 4)
+        {
+            reason = "geometry target package standard envelope invalid";
+            return false;
+        }
+        float envelope_width = 0.0f, envelope_height = 0.0f;
+        envelope[2] >> envelope_width;
+        envelope[3] >> envelope_height;
+        if (!std::isfinite(envelope_width) || !std::isfinite(envelope_height) ||
+            envelope_width <= 0.0f || envelope_height <= 0.0f)
+        {
+            reason = "geometry target package standard envelope dimensions invalid";
+            return false;
+        }
+        sample.geometry_target_values[kGeometryCenterX] = center_x;
+        sample.geometry_target_values[kGeometryCenterY] = center_y;
+        sample.geometry_target_values[kGeometryEnvelopeWidth] = envelope_width;
+        sample.geometry_target_values[kGeometryEnvelopeHeight] = envelope_height;
+        sample.geometry_target_valid[kGeometryCenterX] = 1;
+        sample.geometry_target_valid[kGeometryCenterY] = 1;
+        sample.geometry_target_valid[kGeometryEnvelopeWidth] = 1;
+        sample.geometry_target_valid[kGeometryEnvelopeHeight] = 1;
+
+        // Geometry facts use two legal layouts: primitive facts at root for
+        // boundary primitives, or an instances[0] object for closed regions.
+        const cv::FileNode instances = geometry["instances"];
+        const cv::FileNode primitive =
+            instances.isSeq() && !instances.empty() ? instances[0] : geometry.root();
+        float angle_radians = 0.0f;
+        if (ReadGeometryAngle(primitive["rotation_deg"], angle_radians))
+        {
+            SetGeometryOrientation(sample, angle_radians);
+        }
+        else
+        {
+            const cv::FileNode endpoints = primitive["endpoints_xy"];
+            float start_x = 0.0f, start_y = 0.0f;
+            float end_x = 0.0f, end_y = 0.0f;
+            if (endpoints.isSeq() && endpoints.size() >= 2 &&
+                ReadGeometryPoint(endpoints[0], start_x, start_y) &&
+                ReadGeometryPoint(endpoints[1], end_x, end_y))
+            {
+                SetGeometryOrientation(
+                    sample, std::atan2(end_y - start_y, end_x - start_x));
+            }
+        }
+        std::ifstream label(ResolveDatasetPath(manifest_path, label_ref));
+        int class_id = -1;
+        double cx = 0.0, cy = 0.0, width = 0.0, height = 0.0;
+        if (!(label >> class_id >> cx >> cy >> width >> height) ||
+            class_id < 0 || width <= 0.0 || height <= 0.0)
+        {
+            reason = "geometry target package label invalid";
+            return false;
+        }
+        const cv::Mat mask = cv::imread(sample.target_mask_ref, cv::IMREAD_GRAYSCALE);
+        if (mask.empty())
+        {
+            reason = "geometry target package mask cannot be decoded";
+            return false;
+        }
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        if (contours.empty())
+        {
+            reason = "geometry target package requires a non-empty instance mask";
+            return false;
+        }
+        const auto largest_contour = std::max_element(
+            contours.begin(), contours.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return cv::contourArea(lhs) < cv::contourArea(rhs);
+            });
+        if (largest_contour == contours.end() || largest_contour->size() < 3)
+        {
+            reason = "geometry target package mask has no valid contour";
+            return false;
+        }
+        std::vector<cv::Point2f> polygon;
+        polygon.reserve(largest_contour->size());
+        for (const cv::Point& point : *largest_contour)
+            polygon.emplace_back(
+                static_cast<float>(point.x) / static_cast<float>(mask.cols),
+                static_cast<float>(point.y) / static_cast<float>(mask.rows));
+        if (!AppendDatasetPolygon(sample, class_id, std::move(polygon)))
+        {
+            reason = "geometry target package contour is invalid";
+            return false;
+        }
+        sample.image_id = std::filesystem::path(sample.image_ref).stem().string();
+        sample.label = "geometry_target_ready";
+        if (sample.split == "validation") sample.split = "val";
+        samples.push_back(std::move(sample));
+    }
+    return !samples.empty();
+}
+
 std::string DatasetSplitFromPath(const std::filesystem::path& path)
 {
     for (const auto& component : path)
@@ -382,6 +738,9 @@ bool LoadDatasetFolder(
         root / "torch_training_dataset_manifest.json";
     if (std::filesystem::is_regular_file(exported))
         return LoadExportedTorchDataset(exported, samples, reason);
+    const std::filesystem::path geometry_package = root / "package_manifest.json";
+    if (std::filesystem::is_regular_file(geometry_package))
+        return LoadGeometryTargetPackage(geometry_package, samples, reason);
 
     const std::set<std::string> image_extensions{
         ".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"};
@@ -695,7 +1054,8 @@ std::vector<SegCandidate> DecodeCandidates(
         bool suppressed = false;
         for (const auto& kept : selected)
         {
-            if (candidate.class_id == kept.class_id &&
+            if ((manifest.class_agnostic_nms ||
+                 candidate.class_id == kept.class_id) &&
                 BoxIou(candidate, kept) > manifest.iou_threshold)
             {
                 suppressed = true;
@@ -894,7 +1254,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegTask(
         torch::Tensor input =
             MakeSegInput(image, manifest, letterbox).to(device);
 
-        YoloV8Segment model;
+        YoloV8Segment model(manifest.num_classes);
         const YoloV8SegWeightMappingReport mapping =
             model->load_state_dict_strict(
                 manifest.weights_path.string());
@@ -1246,6 +1606,10 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         torch::Tensor mask_loss;
         int64_t proto_h = 0;
         int64_t proto_w = 0;
+        int64_t geometry_target_valid_fields = 0;
+        bool geometry_primitive_type_available = false;
+        int64_t task_aligned_anchor_count = 0;
+        int64_t task_aligned_positive_count = 0;
     };
 
     struct AblationResult
@@ -1269,6 +1633,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         double class_loss = 0.0;
         double dfl_loss = 0.0;
         double mask_loss = 0.0;
+        bool assignment_quality_targets_active = false;
         double elapsed_ms = 0.0;
         std::map<std::string, Stat> parameter_groups;
     };
@@ -1448,8 +1813,60 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         if (evaluation_samples.empty())
             evaluation_samples = train_samples;
         std::size_t train_instance_count = 0;
+        std::size_t geometry_primitive_type_target_count = 0;
+        std::size_t geometry_unknown_type_count = 0;
+        std::size_t geometry_target_valid_field_count = 0;
+        std::map<std::string, std::size_t> geometry_type_counts;
+        std::map<int64_t, std::string> dataset_class_names;
+        int64_t training_num_classes = 0;
         for (const auto& train_sample : train_samples)
+        {
             train_instance_count += train_sample.classes.size();
+            for (const int64_t class_id : train_sample.classes)
+            {
+                if (class_id < 0)
+                    return SegFailure("dataset_preflight", "negative class id in train split");
+                training_num_classes = std::max(training_num_classes, class_id + 1);
+                if (!train_sample.geometry_type.empty())
+                {
+                    const auto found = dataset_class_names.find(class_id);
+                    if (found != dataset_class_names.end() &&
+                        found->second != train_sample.geometry_type)
+                        return SegFailure(
+                            "dataset_preflight",
+                            "class id maps to multiple geometry types: " +
+                                std::to_string(class_id));
+                    dataset_class_names[class_id] = train_sample.geometry_type;
+                }
+            }
+            if (train_sample.geometry_primitive_type >= 0)
+                ++geometry_primitive_type_target_count;
+            else if (!train_sample.geometry_facts_ref.empty())
+                ++geometry_unknown_type_count;
+            if (!train_sample.geometry_type.empty())
+                ++geometry_type_counts[train_sample.geometry_type];
+            geometry_target_valid_field_count += std::count(
+                train_sample.geometry_target_valid.begin(),
+                train_sample.geometry_target_valid.end(),
+                static_cast<uint8_t>(1));
+        }
+        if (training_num_classes <= 0)
+            return SegFailure("dataset_preflight", "train split has no usable class id");
+        std::vector<std::string> training_class_names;
+        training_class_names.reserve(static_cast<std::size_t>(training_num_classes));
+        for (int64_t class_id = 0; class_id < training_num_classes; ++class_id)
+        {
+            const auto found = dataset_class_names.find(class_id);
+            if (!dataset_class_names.empty() && found == dataset_class_names.end())
+                return SegFailure(
+                    "dataset_preflight",
+                    "geometry ontology has an unrepresented class id: " +
+                        std::to_string(class_id));
+            training_class_names.push_back(
+                found != dataset_class_names.end()
+                    ? found->second
+                    : "class_" + std::to_string(class_id));
+        }
 
         int training_epochs = 3;
         double learning_rate = 1.0e-4;
@@ -1460,6 +1877,16 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         double class_loss_weight = 1.0;
         double dfl_loss_weight = 1.0;
         double mask_loss_weight = 1.0;
+        double mask_dice_loss_weight = 1.0;
+        int assignment_topk = 3;
+        double classification_focal_gamma = 2.0;
+        int use_assignment_quality_targets = 1;
+        int assignment_quality_warmup_epochs = 3;
+        double postprocess_confidence_threshold = manifest.confidence_threshold;
+        double postprocess_iou_threshold = manifest.iou_threshold;
+        int postprocess_max_detections = manifest.max_detections;
+        int postprocess_class_agnostic_nms =
+            manifest.class_agnostic_nms ? 1 : 0;
         if (!request.extra_json.empty())
         {
             try
@@ -1488,6 +1915,24 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                         training_config["dfl_loss_weight"] >> dfl_loss_weight;
                     if (!training_config["mask_loss_weight"].empty())
                         training_config["mask_loss_weight"] >> mask_loss_weight;
+                    if (!training_config["mask_dice_loss_weight"].empty())
+                        training_config["mask_dice_loss_weight"] >> mask_dice_loss_weight;
+                    if (!training_config["assignment_topk"].empty())
+                        training_config["assignment_topk"] >> assignment_topk;
+                    if (!training_config["classification_focal_gamma"].empty())
+                        training_config["classification_focal_gamma"] >> classification_focal_gamma;
+                    if (!training_config["use_assignment_quality_targets"].empty())
+                        training_config["use_assignment_quality_targets"] >> use_assignment_quality_targets;
+                    if (!training_config["assignment_quality_warmup_epochs"].empty())
+                        training_config["assignment_quality_warmup_epochs"] >> assignment_quality_warmup_epochs;
+                    if (!training_config["postprocess_confidence_threshold"].empty())
+                        training_config["postprocess_confidence_threshold"] >> postprocess_confidence_threshold;
+                    if (!training_config["postprocess_iou_threshold"].empty())
+                        training_config["postprocess_iou_threshold"] >> postprocess_iou_threshold;
+                    if (!training_config["postprocess_max_detections"].empty())
+                        training_config["postprocess_max_detections"] >> postprocess_max_detections;
+                    if (!training_config["postprocess_class_agnostic_nms"].empty())
+                        training_config["postprocess_class_agnostic_nms"] >> postprocess_class_agnostic_nms;
                 }
             }
             catch (const cv::Exception&)
@@ -1511,11 +1956,37 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 "training_config", "min_learning_rate must be in [0, learning_rate]");
         if (!std::isfinite(weight_decay) || weight_decay < 0.0)
             return SegFailure("training_config", "weight_decay must be non-negative");
+        if (assignment_topk < 1 || assignment_topk > 100)
+            return SegFailure("training_config", "assignment_topk must be in [1, 100]");
+        if (!std::isfinite(classification_focal_gamma) ||
+            classification_focal_gamma < 0.0 || classification_focal_gamma > 10.0)
+            return SegFailure("training_config", "classification_focal_gamma must be in [0, 10]");
+        if (use_assignment_quality_targets != 0 &&
+            use_assignment_quality_targets != 1)
+            return SegFailure("training_config", "use_assignment_quality_targets must be 0 or 1");
+        if (assignment_quality_warmup_epochs < 0 ||
+            assignment_quality_warmup_epochs > 100)
+            return SegFailure(
+                "training_config",
+                "assignment_quality_warmup_epochs must be in [0, 100]");
+        if (!std::isfinite(postprocess_confidence_threshold) ||
+            postprocess_confidence_threshold < 0.0 ||
+            postprocess_confidence_threshold > 1.0)
+            return SegFailure("training_config", "postprocess_confidence_threshold must be in [0, 1]");
+        if (!std::isfinite(postprocess_iou_threshold) ||
+            postprocess_iou_threshold < 0.0 || postprocess_iou_threshold > 1.0)
+            return SegFailure("training_config", "postprocess_iou_threshold must be in [0, 1]");
+        if (postprocess_max_detections < 1 || postprocess_max_detections > 1000)
+            return SegFailure("training_config", "postprocess_max_detections must be in [1, 1000]");
+        if (postprocess_class_agnostic_nms != 0 &&
+            postprocess_class_agnostic_nms != 1)
+            return SegFailure("training_config", "postprocess_class_agnostic_nms must be 0 or 1");
         for (const auto& loss_weight : std::vector<std::pair<std::string, double>>{
                  {"box_loss_weight", box_loss_weight},
                  {"class_loss_weight", class_loss_weight},
                  {"dfl_loss_weight", dfl_loss_weight},
-                 {"mask_loss_weight", mask_loss_weight}})
+                 {"mask_loss_weight", mask_loss_weight},
+                 {"mask_dice_loss_weight", mask_dice_loss_weight}})
         {
             if (!std::isfinite(loss_weight.second) || loss_weight.second < 0.0)
                 return SegFailure(
@@ -1537,10 +2008,23 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         torch::Tensor input =
             MakeSegInput(image, manifest, letterbox).to(device);
 
-        YoloV8Segment model;
-        const YoloV8SegWeightMappingReport mapping =
-            model->load_state_dict_strict(
-                manifest.weights_path.string());
+        const int parent_num_classes = manifest.num_classes;
+        const bool classifier_transfer =
+            parent_num_classes != training_num_classes;
+        // The target ontology is established from the reproducible dataset,
+        // never inherited from a parent COCO manifest.
+        manifest.num_classes = static_cast<int>(training_num_classes);
+        manifest.class_names = training_class_names;
+        manifest.confidence_threshold =
+            static_cast<float>(postprocess_confidence_threshold);
+        manifest.iou_threshold = static_cast<float>(postprocess_iou_threshold);
+        manifest.max_detections = postprocess_max_detections;
+        manifest.class_agnostic_nms = postprocess_class_agnostic_nms != 0;
+        YoloV8Segment model(training_num_classes);
+        const YoloV8SegWeightMappingReport mapping = classifier_transfer
+            ? model->load_state_dict_transfer_classifier(
+                  manifest.weights_path.string())
+            : model->load_state_dict_strict(manifest.weights_path.string());
         model->to(device);
         model->train();
 
@@ -1549,10 +2033,67 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             const YoloV8SegRawOutput& raw,
             const YoloV8SegDatasetSample& active_sample,
             const torch::Tensor& active_input,
-            const SegLetterbox& active_letterbox) {
+            const SegLetterbox& active_letterbox,
+            bool quality_targets_active) {
             LossTensors result;
             result.proto_h = raw.prototypes.size(2);
             result.proto_w = raw.prototypes.size(3);
+            const GeometryTargetTensors geometry_targets =
+                BuildGeometryTargetTensors(
+                    active_sample, active_letterbox,
+                    manifest.input_width, manifest.input_height,
+                    active_input.device());
+            result.geometry_target_valid_fields =
+                geometry_targets.valid_mask.sum().item<int64_t>();
+            result.geometry_primitive_type_available =
+                geometry_targets.primitive_type_valid;
+            const SegTaskAlignedAnchorTable task_aligned_anchors =
+                BuildSegTaskAlignedAnchorTable(
+                    raw, active_model, manifest.input_width, manifest.input_height);
+            result.task_aligned_anchor_count =
+                task_aligned_anchors.class_logits.size(1);
+            std::vector<int64_t> assignment_labels;
+            std::vector<float> assignment_boxes;
+            assignment_labels.reserve(active_sample.classes.size());
+            assignment_boxes.reserve(active_sample.classes.size() * 4);
+            for (std::size_t target_index = 0;
+                 target_index < active_sample.classes.size(); ++target_index)
+            {
+                const auto& target_box = active_sample.boxes_xyxy_norm[target_index];
+                const auto to_input_x = [&](float value) {
+                    return static_cast<float>((active_letterbox.pad_x +
+                        value * active_letterbox.resized_width) /
+                        static_cast<double>(manifest.input_width));
+                };
+                const auto to_input_y = [&](float value) {
+                    return static_cast<float>((active_letterbox.pad_y +
+                        value * active_letterbox.resized_height) /
+                        static_cast<double>(manifest.input_height));
+                };
+                assignment_labels.push_back(std::clamp<int64_t>(
+                    active_sample.classes[target_index], 0, manifest.num_classes - 1));
+                assignment_boxes.insert(assignment_boxes.end(), {
+                    to_input_x(target_box[0]), to_input_y(target_box[1]),
+                    to_input_x(target_box[2]), to_input_y(target_box[3])});
+            }
+            const int64_t assignment_target_count =
+                static_cast<int64_t>(assignment_labels.size());
+            const auto assignment_options = torch::TensorOptions()
+                .dtype(torch::kLong).device(active_input.device());
+            const torch::Tensor assignment_gt_labels = torch::tensor(
+                assignment_labels, assignment_options).view({1, assignment_target_count});
+            const torch::Tensor assignment_gt_boxes = torch::tensor(
+                assignment_boxes, active_input.options()).view({1, assignment_target_count, 4});
+            const torch::Tensor assignment_gt_mask = torch::ones(
+                {1, assignment_target_count}, active_input.options());
+            TaskAlignedAssigner task_aligned_assigner(
+                assignment_topk, manifest.num_classes, 1.0f, 6.0f);
+            torch::Tensor assigned_gt_indices = task_aligned_assigner->forward(
+                task_aligned_anchors.class_logits.sigmoid(),
+                task_aligned_anchors.decoded_boxes, assignment_gt_labels,
+                assignment_gt_boxes, assignment_gt_mask);
+            result.task_aligned_positive_count =
+                (assigned_gt_indices > 0).sum().item<int64_t>();
             const torch::Tensor proto_flat =
                 raw.prototypes.index({0}).view({manifest.mask_channels, -1});
 
@@ -1564,6 +2105,157 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 torch::zeros({}, active_input.options());
             torch::Tensor dfl_loss =
                 torch::zeros({}, active_input.options());
+            torch::Tensor task_aligned_box_loss =
+                torch::zeros({}, active_input.options());
+            torch::Tensor task_aligned_dfl_loss =
+                torch::zeros({}, active_input.options());
+            const torch::Tensor task_aligned_positive_mask = assigned_gt_indices > 0;
+            torch::Tensor task_aligned_class_target =
+                torch::zeros_like(task_aligned_anchors.class_logits.index({0}));
+            if (task_aligned_positive_mask.any().item<bool>())
+            {
+                const torch::Tensor positive_indices = torch::nonzero(
+                    task_aligned_positive_mask.index({0})).squeeze(1);
+                const torch::Tensor positive_gt_indices = assigned_gt_indices.index({0})
+                    .index_select(0, positive_indices).to(torch::kLong) - 1;
+                const torch::Tensor positive_classes = assignment_gt_labels.index({0})
+                    .index_select(0, positive_gt_indices);
+                const torch::Tensor positive_boxes = assignment_gt_boxes.index({0})
+                    .index_select(0, positive_gt_indices);
+                const torch::Tensor predicted_boxes = task_aligned_anchors.decoded_boxes.index({0})
+                    .index_select(0, positive_indices);
+                task_aligned_box_loss =
+                    torch::abs(predicted_boxes - positive_boxes).mean();
+                const torch::Tensor centers = task_aligned_anchors.centers_xy.index({0})
+                    .index_select(0, positive_indices);
+                const torch::Tensor grid_widths = task_aligned_anchors.grid_widths.index({0})
+                    .index_select(0, positive_indices);
+                const torch::Tensor grid_heights = task_aligned_anchors.grid_heights.index({0})
+                    .index_select(0, positive_indices);
+                const torch::Tensor dfl_target = torch::stack({
+                    ((centers.select(1, 0) - positive_boxes.select(1, 0)) * grid_widths).clamp(0.0, 15.999),
+                    ((centers.select(1, 1) - positive_boxes.select(1, 1)) * grid_heights).clamp(0.0, 15.999),
+                    ((positive_boxes.select(1, 2) - centers.select(1, 0)) * grid_widths).clamp(0.0, 15.999),
+                    ((positive_boxes.select(1, 3) - centers.select(1, 1)) * grid_heights).clamp(0.0, 15.999)}, 1);
+                const torch::Tensor dfl_logits = task_aligned_anchors.dfl_logits.index({0})
+                    .index_select(0, positive_indices).view({-1, 16});
+                const torch::Tensor target_left = torch::floor(dfl_target).to(torch::kLong).view({-1});
+                const torch::Tensor target_right = (target_left + 1).clamp_max(15);
+                const torch::Tensor right_weight = (dfl_target - torch::floor(dfl_target)).view({-1});
+                const torch::Tensor dfl_ce_left = torch::nn::functional::cross_entropy(
+                    dfl_logits, target_left, torch::nn::functional::CrossEntropyFuncOptions().reduction(torch::kNone));
+                const torch::Tensor dfl_ce_right = torch::nn::functional::cross_entropy(
+                    dfl_logits, target_right, torch::nn::functional::CrossEntropyFuncOptions().reduction(torch::kNone));
+                task_aligned_dfl_loss =
+                    ((1.0 - right_weight) * dfl_ce_left + right_weight * dfl_ce_right).mean();
+                torch::Tensor quality = torch::ones(
+                    {positive_indices.size(0)}, active_input.options());
+                if (quality_targets_active)
+                {
+                    const torch::Tensor predicted = task_aligned_anchors.decoded_boxes.index({0})
+                        .index_select(0, positive_indices);
+                    const torch::Tensor target = assignment_gt_boxes.index({0})
+                        .index_select(0, positive_gt_indices);
+                    const torch::Tensor inter_x0 = torch::max(predicted.select(1, 0), target.select(1, 0));
+                    const torch::Tensor inter_y0 = torch::max(predicted.select(1, 1), target.select(1, 1));
+                    const torch::Tensor inter_x1 = torch::min(predicted.select(1, 2), target.select(1, 2));
+                    const torch::Tensor inter_y1 = torch::min(predicted.select(1, 3), target.select(1, 3));
+                    const torch::Tensor intersection = (inter_x1 - inter_x0).clamp_min(0) *
+                        (inter_y1 - inter_y0).clamp_min(0);
+                    const torch::Tensor predicted_area = (predicted.select(1, 2) - predicted.select(1, 0)).clamp_min(0) *
+                        (predicted.select(1, 3) - predicted.select(1, 1)).clamp_min(0);
+                    const torch::Tensor target_area = (target.select(1, 2) - target.select(1, 0)).clamp_min(0) *
+                        (target.select(1, 3) - target.select(1, 1)).clamp_min(0);
+                    quality = (intersection / (predicted_area + target_area - intersection + 1.0e-7)).detach();
+                }
+                task_aligned_class_target.index_put_(
+                    {positive_indices, positive_classes}, quality);
+            }
+            const torch::Tensor task_aligned_class_bce =
+                torch::nn::functional::binary_cross_entropy_with_logits(
+                    task_aligned_anchors.class_logits.index({0}),
+                    task_aligned_class_target,
+                    torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions()
+                        .reduction(torch::kNone));
+            const torch::Tensor task_aligned_class_loss =
+                classification_focal_gamma > 0.0
+                ? (task_aligned_class_bce * (task_aligned_class_target -
+                    task_aligned_anchors.class_logits.index({0}).sigmoid())
+                    .abs().pow(classification_focal_gamma)).mean()
+                : task_aligned_class_bce.mean();
+            torch::Tensor task_aligned_mask_loss =
+                torch::zeros({}, active_input.options());
+            if (task_aligned_positive_mask.any().item<bool>())
+            {
+                std::vector<torch::Tensor> target_masks;
+                target_masks.reserve(active_sample.polygons_norm.size());
+                for (const auto& polygon : active_sample.polygons_norm)
+                {
+                    cv::Mat mask_cv(static_cast<int>(result.proto_h),
+                        static_cast<int>(result.proto_w), CV_8UC1, cv::Scalar(0));
+                    if (!active_sample.target_mask_ref.empty())
+                    {
+                        const cv::Mat source_mask = cv::imread(
+                            active_sample.target_mask_ref, cv::IMREAD_GRAYSCALE);
+                        TORCH_CHECK(!source_mask.empty(), "assigned target mask cannot be decoded");
+                        cv::Mat resized_mask;
+                        cv::resize(source_mask, resized_mask,
+                            cv::Size(active_letterbox.resized_width,
+                                active_letterbox.resized_height),
+                            0.0, 0.0, cv::INTER_NEAREST);
+                        cv::Mat input_mask(manifest.input_height,
+                            manifest.input_width, CV_8UC1, cv::Scalar(0));
+                        resized_mask.copyTo(input_mask(cv::Rect(
+                            active_letterbox.pad_x, active_letterbox.pad_y,
+                            active_letterbox.resized_width,
+                            active_letterbox.resized_height)));
+                        cv::resize(input_mask, mask_cv,
+                            cv::Size(static_cast<int>(result.proto_w),
+                                static_cast<int>(result.proto_h)),
+                            0.0, 0.0, cv::INTER_NEAREST);
+                    }
+                    else
+                    {
+                        std::vector<cv::Point> points;
+                        points.reserve(polygon.size());
+                        for (const cv::Point2f& point : polygon)
+                        {
+                            const int x = std::clamp(static_cast<int>(std::lround(
+                                (active_letterbox.pad_x + point.x * active_letterbox.resized_width) /
+                                static_cast<double>(manifest.input_width) * result.proto_w)),
+                                0, static_cast<int>(result.proto_w) - 1);
+                            const int y = std::clamp(static_cast<int>(std::lround(
+                                (active_letterbox.pad_y + point.y * active_letterbox.resized_height) /
+                                static_cast<double>(manifest.input_height) * result.proto_h)),
+                                0, static_cast<int>(result.proto_h) - 1);
+                            points.emplace_back(x, y);
+                        }
+                        cv::fillPoly(mask_cv,
+                            std::vector<std::vector<cv::Point>>{points},
+                            cv::Scalar(255), cv::LINE_8);
+                    }
+                    target_masks.push_back(torch::from_blob(mask_cv.data,
+                        {result.proto_h, result.proto_w}, torch::TensorOptions().dtype(torch::kUInt8))
+                        .clone().to(active_input.device()).to(active_input.scalar_type()) / 255.0);
+                }
+                const torch::Tensor positive_indices = torch::nonzero(
+                    task_aligned_positive_mask.index({0})).squeeze(1);
+                const torch::Tensor positive_gt_indices = assigned_gt_indices.index({0})
+                    .index_select(0, positive_indices).to(torch::kLong) - 1;
+                const torch::Tensor coefficients = task_aligned_anchors.mask_coefficients.index({0})
+                    .index_select(0, positive_indices);
+                const torch::Tensor mask_logits = torch::matmul(coefficients, proto_flat)
+                    .view({positive_indices.size(0), result.proto_h, result.proto_w});
+                const torch::Tensor mask_target = torch::stack(target_masks, 0)
+                    .index_select(0, positive_gt_indices);
+                const torch::Tensor mask_bce = torch::nn::functional::binary_cross_entropy_with_logits(
+                    mask_logits, mask_target,
+                    torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone)).mean();
+                const torch::Tensor probability = mask_logits.sigmoid();
+                const torch::Tensor dice = 1.0 - (2.0 * (probability * mask_target).sum({1, 2}) + 1.0) /
+                    (probability.sum({1, 2}) + mask_target.sum({1, 2}) + 1.0);
+                task_aligned_mask_loss = mask_bce + dice.mean() * mask_dice_loss_weight;
+            }
             for (std::size_t index = 0;
                  index < active_sample.classes.size();
                  ++index)
@@ -1647,10 +2339,15 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                     const torch::Tensor mask_logits =
                         torch::matmul(coeff, proto_flat)
                             .view({result.proto_h, result.proto_w});
-                    mask_loss = mask_loss +
+                    const torch::Tensor mask_bce =
                         torch::binary_cross_entropy_with_logits(
-                            mask_logits,
-                            mask_target);
+                            mask_logits, mask_target);
+                    const torch::Tensor mask_probability = mask_logits.sigmoid();
+                    const torch::Tensor dice = 1.0 -
+                        (2.0 * (mask_probability * mask_target).sum() + 1.0) /
+                        (mask_probability.sum() + mask_target.sum() + 1.0);
+                    mask_loss = mask_loss + mask_bce +
+                        dice * mask_dice_loss_weight;
 
                     const float stride =
                         static_cast<float>(manifest.input_width) /
@@ -1716,10 +2413,10 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             const double loss_terms =
                 static_cast<double>(
                     active_sample.classes.size() * raw.class_logits.size());
-            result.class_loss = class_loss / loss_terms;
-            result.mask_loss = mask_loss / loss_terms;
-            result.box_loss = box_loss / loss_terms;
-            result.dfl_loss = dfl_loss / loss_terms;
+            result.class_loss = task_aligned_class_loss;
+            result.mask_loss = task_aligned_mask_loss;
+            result.box_loss = task_aligned_box_loss;
+            result.dfl_loss = task_aligned_dfl_loss;
             result.total_loss =
                 result.class_loss * class_loss_weight +
                 result.mask_loss * mask_loss_weight +
@@ -1786,7 +2483,9 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 YoloV8SegRawOutput active_raw = model->forward(active_input);
                 const LossTensors losses = compute_losses(
                     model, active_raw, active_sample, active_input,
-                    active_letterbox);
+                    active_letterbox,
+                    use_assignment_quality_targets != 0 &&
+                        epoch > assignment_quality_warmup_epochs);
                 (losses.total_loss /
                  static_cast<double>(train_samples.size())).backward();
                 epoch_total += losses.total_loss.detach().item<double>();
@@ -1812,6 +2511,9 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             metric.class_loss = epoch_class / train_divisor;
             metric.dfl_loss = epoch_dfl / train_divisor;
             metric.mask_loss = epoch_mask / train_divisor;
+            metric.assignment_quality_targets_active =
+                use_assignment_quality_targets != 0 &&
+                epoch > assignment_quality_warmup_epochs;
             metric.elapsed_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - epoch_started).count();
             for (const auto& named : model->named_parameters(true))
@@ -1867,11 +2569,49 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
         const auto stability_report_ref = output_dir / "stability_report.md";
         const auto timeout_report_ref = output_dir / "timeout_report.md";
         const auto human_review_ref = output_dir / "human_review.json";
+        const auto parent_transfer_ref = output_dir / "parent_transfer_receipt.json";
         const auto evidence_ref =
             output_dir / "yolov8seg_backward_smoke_evidence.json";
         const auto checkpoint_ref =
             weights_dir / "yolov8n_seg_backward_smoke_state_dict.pt";
         const auto manifest_ref = output_dir / "model_manifest.json";
+
+        auto write_key_array = [](std::ostream& out,
+                                  const std::vector<std::string>& values) {
+            out << "[";
+            for (std::size_t index = 0; index < values.size(); ++index)
+            {
+                if (index > 0)
+                    out << ",";
+                out << QuoteSegJson(values[index]);
+            }
+            out << "]";
+        };
+        std::ofstream parent_transfer(parent_transfer_ref);
+        parent_transfer
+            << "{\n"
+            << "  \"schema\":\"cxvision.yolov8seg.parent_transfer.v1\",\n"
+            << "  \"parent_manifest\":" << QuoteSegJson(request.manifest_path) << ",\n"
+            << "  \"parent_num_classes\":" << parent_num_classes << ",\n"
+            << "  \"target_num_classes\":" << manifest.num_classes << ",\n"
+            << "  \"transfer_mode\":"
+            << QuoteSegJson(classifier_transfer
+                   ? "strict_feature_transfer_classifier_reinitialized"
+                   : "strict_full_state") << ",\n"
+            << "  \"loaded_tensor_count\":" << mapping.loaded_count << ",\n"
+            << "  \"reinitialized_classifier_keys\":";
+        write_key_array(parent_transfer, mapping.reinitialized_keys);
+        parent_transfer
+            << ",\n  \"target_classes\":";
+        write_key_array(parent_transfer, manifest.class_names);
+        parent_transfer
+            << ",\n  \"mapping_complete\":"
+            << ((classifier_transfer ? mapping.transfer_complete() : mapping.complete())
+                    ? "true" : "false")
+            << "\n}\n";
+        parent_transfer.close();
+        if (!parent_transfer.good())
+            return SegFailure("parent_transfer", "failed to write parent transfer receipt");
 
         std::size_t val_sample_count = 0;
         std::size_t test_sample_count = 0;
@@ -1937,20 +2677,49 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             << "  \"status\":\"completed\",\n"
             << "  \"task\":\"torch.train.instance_segmentation.yolov8.backward_smoke.v1\",\n"
             << "  \"dataset_source\":" << QuoteSegJson(request.dataset_root) << ",\n"
+            << "  \"parent_transfer_receipt_ref\":"
+            << QuoteSegJson(parent_transfer_ref.string()) << ",\n"
+            << "  \"target_num_classes\":" << manifest.num_classes << ",\n"
             << "  \"optimizer\":\"Adam\",\n"
             << "  \"learning_rate\":" << learning_rate << ",\n"
             << "  \"lr_schedule\":" << QuoteSegJson(lr_schedule) << ",\n"
             << "  \"min_learning_rate\":" << min_learning_rate << ",\n"
             << "  \"weight_decay\":" << weight_decay << ",\n"
-            << "  \"loss_phase\":\"weighted_class_mask_box_dfl\",\n"
+            << "  \"loss_phase\":\"weighted_class_mask_bce_dice_box_dfl\",\n"
+            << "  \"assignment\":{\"status\":\"active\",\"method\":\"dfl_aware_global_task_aligned\",\"scope\":\"global_p3_p4_p5\",\"shared_index_losses\":[\"class\",\"box\",\"dfl\",\"mask\"]},\n"
+            << "  \"assignment_controls\":{\"assignment_topk\":" << assignment_topk
+            << ",\"classification_focal_gamma\":" << classification_focal_gamma
+            << ",\"use_assignment_quality_targets\":"
+            << (use_assignment_quality_targets == 0 ? "false" : "true") << "},\n"
+            << "  \"assignment_quality_warmup_epochs\":"
+            << assignment_quality_warmup_epochs << ",\n"
             << "  \"loss_weights\":{\"box\":" << box_loss_weight
             << ",\"class\":" << class_loss_weight
             << ",\"dfl\":" << dfl_loss_weight
-            << ",\"mask\":" << mask_loss_weight << "},\n"
+            << ",\"mask\":" << mask_loss_weight
+            << ",\"mask_dice\":" << mask_dice_loss_weight << "},\n"
             << "  \"configured_epochs\":" << training_epochs << ",\n"
             << "  \"completed_epochs\":" << training_trace.size() << ",\n"
             << "  \"train_sample_count\":" << train_samples.size() << ",\n"
             << "  \"train_instance_count\":" << train_instance_count << ",\n"
+            << "  \"geometry_target_tensor\":{\"status\":\"prepared_not_loss_consumed\""
+            << ",\"primitive_type_target_count\":"
+            << geometry_primitive_type_target_count
+            << ",\"unknown_primitive_type_count\":"
+            << geometry_unknown_type_count
+            << ",\"valid_scalar_field_count\":"
+            << geometry_target_valid_field_count
+            << ",\"fields\":[\"center_x\",\"center_y\",\"envelope_width\",\"envelope_height\",\"sin_angle\",\"cos_angle\"]"
+            << ",\"source_type_counts\":{";
+        for (auto type_it = geometry_type_counts.begin();
+             type_it != geometry_type_counts.end(); ++type_it)
+        {
+            if (type_it != geometry_type_counts.begin())
+                training_trace_file << ",";
+            training_trace_file << QuoteSegJson(type_it->first)
+                << ":" << type_it->second;
+        }
+        training_trace_file << "}},\n"
             << "  \"epochs\":[\n";
         for (std::size_t index = 0; index < training_trace.size(); ++index)
         {
@@ -1963,6 +2732,8 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 << ",\"class_loss\":" << metric.class_loss
                 << ",\"dfl_loss\":" << metric.dfl_loss
                 << ",\"mask_loss\":" << metric.mask_loss
+                << ",\"assignment_quality_targets_active\":"
+                << (metric.assignment_quality_targets_active ? "true" : "false")
                 << ",\"elapsed_ms\":" << metric.elapsed_ms
                 << ",\"sample_count\":" << train_samples.size()
                 << ",\"instance_count\":" << train_instance_count
@@ -2058,7 +2829,9 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 << confidence_threshold
                 << ",\"iou_threshold\":" << manifest.iou_threshold
                 << ",\"mask_threshold\":" << manifest.mask_threshold
-                << ",\"max_detections\":" << manifest.max_detections << "},\n"
+                << ",\"max_detections\":" << manifest.max_detections
+                << ",\"class_agnostic_nms\":"
+                << (manifest.class_agnostic_nms ? "true" : "false") << "},\n"
                 << "  \"training_smoke\":{\"sample_count\":"
                 << train_samples.size() << ","
                 << "\"instance_count\":" << train_instance_count
@@ -2082,7 +2855,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 "yolov8n_seg_backward_smoke_v1",
                 "weights/yolov8n_seg_backward_smoke_state_dict.pt",
                 checkpoint_ref,
-                0.25))
+                postprocess_confidence_threshold))
             return SegFailure("manifest_write", "failed to write YOLOv8-Seg trained manifest");
 
         const double class_loss_value =
@@ -2197,10 +2970,13 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             "box_head"};
         for (const std::string& freeze_group : freeze_groups)
         {
-            YoloV8Segment ablation_model;
+            YoloV8Segment ablation_model(training_num_classes);
             const YoloV8SegWeightMappingReport ablation_mapping =
-                ablation_model->load_state_dict_strict(
-                    manifest.weights_path.string());
+                classifier_transfer
+                ? ablation_model->load_state_dict_transfer_classifier(
+                      manifest.weights_path.string())
+                : ablation_model->load_state_dict_strict(
+                      manifest.weights_path.string());
             (void)ablation_mapping;
             ablation_model->to(device);
             ablation_model->train();
@@ -2240,7 +3016,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                     ablation_model->forward(active_input);
                 const LossTensors losses = compute_losses(
                     ablation_model, ablation_raw, active_sample, active_input,
-                    active_letterbox);
+                    active_letterbox, false);
                 (losses.total_loss / ablation_divisor).backward();
                 ablation_total += losses.total_loss.detach().item<double>();
                 ablation_box += losses.box_loss.detach().item<double>();
@@ -2503,10 +3279,13 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                 case_weights_dir / "yolov8n_seg_backward_smoke_state_dict.pt";
             const auto case_manifest = case_root / "model_manifest.json";
 
-            YoloV8Segment stability_model;
+            YoloV8Segment stability_model(training_num_classes);
             const YoloV8SegWeightMappingReport stability_mapping =
-                stability_model->load_state_dict_strict(
-                    manifest.weights_path.string());
+                classifier_transfer
+                ? stability_model->load_state_dict_transfer_classifier(
+                      manifest.weights_path.string())
+                : stability_model->load_state_dict_strict(
+                      manifest.weights_path.string());
             (void)stability_mapping;
             stability_model->to(device);
             stability_model->train();
@@ -2528,7 +3307,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                     stability_model->forward(active_input);
                 const LossTensors losses = compute_losses(
                     stability_model, stability_raw, active_sample, active_input,
-                    active_letterbox);
+                    active_letterbox, false);
                 (losses.total_loss /
                  static_cast<double>(active_samples.size())).backward();
                 variant_losses.total_loss += losses.total_loss.detach().item<double>();
@@ -2551,7 +3330,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
                     "yolov8n_seg_backward_smoke_" + case_id,
                     "weights/yolov8n_seg_backward_smoke_state_dict.pt",
                     case_checkpoint,
-                    0.25))
+                    postprocess_confidence_threshold))
             {
                 StabilityResult row;
                 row.case_id = case_id;
@@ -2858,6 +3637,8 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             << "  \"freeze_ablation_report_ref\":" << QuoteSegJson(ablation_ref.string()) << ",\n"
             << "  \"dataset_summary_ref\":" << QuoteSegJson(dataset_summary_ref.string()) << ",\n"
             << "  \"training_trace_ref\":" << QuoteSegJson(training_trace_ref.string()) << ",\n"
+            << "  \"parent_transfer_receipt_ref\":"
+            << QuoteSegJson(parent_transfer_ref.string()) << ",\n"
             << "  \"l2_case_matrix_ref\":" << QuoteSegJson(l2_matrix_ref.string()) << ",\n"
             << "  \"stability_matrix_ref\":" << QuoteSegJson(stability_ref.string()) << ",\n"
             << "  \"result_variation_ref\":" << QuoteSegJson(variation_ref.string()) << ",\n"
@@ -2922,6 +3703,7 @@ TorchTaskResultCpp ExecuteTorchYoloV8SegBackwardSmokeTask(
             ",\"dataset_source\":" + QuoteSegJson(request.dataset_root) +
             ",\"dataset_summary_ref\":" + QuoteSegJson(dataset_summary_ref.string()) +
             ",\"training_trace_ref\":" + QuoteSegJson(training_trace_ref.string()) +
+            ",\"parent_transfer_receipt_ref\":" + QuoteSegJson(parent_transfer_ref.string()) +
             ",\"train_sample_count\":" + std::to_string(train_samples.size()) +
             ",\"train_instance_count\":" + std::to_string(train_instance_count) +
             ",\"evaluation_case_count\":" + std::to_string(evaluation_samples.size()) +

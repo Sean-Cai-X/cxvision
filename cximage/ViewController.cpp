@@ -2497,6 +2497,79 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
   applied += applyIntToken("find_num", "global_find_num") ? 1 : 0;
   applied += applyIntToken("compare_gap", "global_compare_gap") ? 1 : 0;
   applied += applyIntToken("objfilter", "global_objfilter") ? 1 : 0;
+  applied +=
+      applyIntToken("fastmatch_action", "global_fastmatch_action") ? 1 : 0;
+  applied += applyIntToken("fastmatch_scan_rotation_deg",
+                           "global_fastmatch_scan_rotation_deg")
+                 ? 1
+                 : 0;
+  applied += applyIntToken("fastmatch_learn_shared",
+                           "global_fastmatch_learn_shared")
+                 ? 1
+                 : 0;
+
+  const std::pair<const char *, const char *> fastMatchNormalTraceParams[] = {
+      {"fastmatch_normaltrace_enabled",
+       "global_fastmatch_normaltrace_enabled"},
+      {"fastmatch_normaltrace_overlap_radius_px",
+       "global_fastmatch_normaltrace_overlap_radius_px"},
+      {"fastmatch_normaltrace_xy_compression_bin_px",
+       "global_fastmatch_normaltrace_xy_compression_bin_px"},
+      {"fastmatch_normaltrace_knn_neighbors",
+       "global_fastmatch_normaltrace_knn_neighbors"},
+      {"fastmatch_normaltrace_ann_radius_px",
+       "global_fastmatch_normaltrace_ann_radius_px"},
+      {"fastmatch_normaltrace_ann_min_component_points",
+       "global_fastmatch_normaltrace_ann_min_component_points"},
+      {"fastmatch_normaltrace_ann_min_component_coverage_percent",
+       "global_fastmatch_normaltrace_ann_min_component_coverage_percent"},
+      {"fastmatch_normaltrace_pair_offset_px",
+       "global_fastmatch_normaltrace_pair_offset_px"},
+      {"fastmatch_normaltrace_min_keypoints_per_domain",
+       "global_fastmatch_normaltrace_min_keypoints_per_domain"},
+      {"fastmatch_normaltrace_min_length_px",
+       "global_fastmatch_normaltrace_min_length_px"},
+      {"fastmatch_normaltrace_min_gradient",
+       "global_fastmatch_normaltrace_min_gradient"},
+      {"fastmatch_normaltrace_max_nodes",
+       "global_fastmatch_normaltrace_max_nodes"},
+      {"fastmatch_normaltrace_max_trace_gap_px",
+       "global_fastmatch_normaltrace_max_trace_gap_px"},
+      {"fastmatch_normaltrace_anchor_radius_px",
+       "global_fastmatch_normaltrace_anchor_radius_px"},
+      {"fastmatch_normaltrace_ann_tangent_deviation_deg",
+       "global_fastmatch_normaltrace_ann_tangent_deviation_deg"},
+      {"fastmatch_normaltrace_ann_normal_deviation_deg",
+       "global_fastmatch_normaltrace_ann_normal_deviation_deg"},
+      {"fastmatch_normaltrace_polarity",
+       "global_fastmatch_normaltrace_polarity"}};
+  for (const auto &entry : fastMatchNormalTraceParams)
+    applied += applyIntToken(entry.first, entry.second) ? 1 : 0;
+
+  for (int direction = 0; direction < 4; ++direction) {
+    const std::string suffix = std::to_string(direction);
+    const std::pair<std::string, std::string> directionalParams[] = {
+        {"fastmatch_learn_threshold_" + suffix,
+         "global_fastmatch_learn_threshold_" + suffix},
+        {"fastmatch_learn_method_" + suffix,
+         "global_fastmatch_learn_method_" + suffix},
+        {"fastmatch_learn_wgap_" + suffix,
+         "global_fastmatch_learn_wgap_" + suffix},
+        {"fastmatch_learn_hgap_" + suffix,
+         "global_fastmatch_learn_hgap_" + suffix},
+        {"fastmatch_learn_linegap_" + suffix,
+         "global_fastmatch_learn_linegap_" + suffix},
+        {"fastmatch_learn_compare_gap_" + suffix,
+         "global_fastmatch_learn_compare_gap_" + suffix},
+        {"fastmatch_learn_objfilter_" + suffix,
+         "global_fastmatch_learn_objfilter_" + suffix},
+        {"fastmatch_learn_edge_count_" + suffix,
+         "global_fastmatch_learn_edge_count_" + suffix},
+        {"fastmatch_learn_selected_edge_" + suffix,
+         "global_fastmatch_learn_selected_edge_" + suffix}};
+    for (const auto &entry : directionalParams)
+      applied += applyIntToken(entry.first, entry.second) ? 1 : 0;
+  }
   applied += applyIntToken("max_elapsed_ms", "global_max_elapsed_ms") ? 1 : 0;
   applied += applyIntToken("max_scan_lines", "global_max_scan_lines") ? 1 : 0;
   applied += applyIntToken("max_samples", "global_max_samples") ? 1 : 0;

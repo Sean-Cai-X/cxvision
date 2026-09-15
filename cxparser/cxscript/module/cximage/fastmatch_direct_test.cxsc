@@ -2,6 +2,7 @@ Image m_image;
 FastMatch m_match;
 
 // fastmatch_normal_trace_binding_version: 3
+// Version 3 follows the confirmed fixed-int Param_int_N dispatch order.
 // Version 2 follows the confirmed fixed-int Param_int_N dispatch order.
 
 m_image.copyFromMat(global_matInput);
@@ -259,6 +260,25 @@ m_match.setnormaltracejunction(
     global_fastmatch_normaltrace_junction_min_cross_angle_deg,
     global_fastmatch_normaltrace_junction_tangent_window_points,
     global_fastmatch_normaltrace_endpoint_spike_ratio_percent);
+m_match.setformfitenabled(global_fastmatch_formfit_enabled);
+// Fixed-int dispatch is reversed at Param_int_N; source order below therefore
+// preserves the operator-facing order in FastMatch's C++ API.
+m_match.setformfitdenseparams(
+    global_fastmatch_formfit_curvature_threshold_millideg,
+    global_fastmatch_formfit_min_gradient,
+    global_fastmatch_formfit_profile_step_milli_px,
+    global_fastmatch_formfit_profile_half_width_milli_px,
+    global_fastmatch_formfit_dense_step_milli_px);
+m_match.setformfitannparams(
+    global_fastmatch_formfit_max_iterations,
+    global_fastmatch_formfit_min_mutual_pairs,
+    global_fastmatch_formfit_trim_percent,
+    global_fastmatch_formfit_normal_tolerance_deg,
+    global_fastmatch_formfit_ann_radius_milli_px);
+m_match.setformfitbudget(
+    global_fastmatch_formfit_allow_affine,
+    global_fastmatch_formfit_max_anchors,
+    global_fastmatch_formfit_max_elapsed_ms);
 m_match.setcalibrationtestenabled(calibration_test_enabled);
 if (calibration_test_enabled == 1)
 {
@@ -333,3 +353,11 @@ if (should_match == 1)
     global_fastmatch_transform_best_physical_cx_milliunit = m_match.gettransformsearchphysicalcx() * 1000;
     global_fastmatch_transform_best_physical_cy_milliunit = m_match.gettransformsearchphysicalcy() * 1000;
 }
+
+global_fastmatch_formfit_status_code = m_match.getformfitstatuscode();
+global_fastmatch_formfit_reference_count = m_match.getformfitreferencecount();
+global_fastmatch_formfit_observed_count = m_match.getformfitobservedcount();
+global_fastmatch_formfit_mutual_count = m_match.getformfitmutualcount();
+global_fastmatch_formfit_anchor_count = m_match.getformfitanchorcount();
+global_fastmatch_formfit_score_permille = m_match.getformfitscore() * 1000;
+global_fastmatch_formfit_residual_milli_px = m_match.getformfitresidual() * 1000;

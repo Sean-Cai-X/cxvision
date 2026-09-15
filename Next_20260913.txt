@@ -513,3 +513,160 @@ Dijkstra是工序，关键点是锚点，**ANN才是贯穿从聚类到匹配的�
 
   因此，最先落地的不是直接写“双向 ANN 全量匹配”，而是 P0 统一形状模型契约 + P1 亚像素坐标保真。如果这两步不先完成，后续
   即使实现了双向 ANN，也只是在整数化、来源不清的点集上做更复杂的匹配，无法形成真正可发布的计量证据。
+  
+  P6「接入 FormfitGauge」已完成并通过真实 Headless 链路验证。
+
+  完成状态：
+
+  - COMPILE_PASS
+  - NORMAL_TRACE_COMPLETE
+  - FORM_FIT_COMPLETE
+  - T3_HEADLESS_EXECUTION_PASS
+  - 人工 GUI 复核：PENDING_HUMAN_REVIEW
+
+  核心结果：
+
+  - 原始 Dijkstra 结论点：46
+  - 有效法向 A/B 对：22，四方向 3/8/3/8
+  - 法向绑定失败：0
+  - 稠密轮廓点：844
+  - 亚像素点：756
+  - 结构锚点：64
+  - 双向 ANN mutual pairs：638
+  - mutual coverage：0.7559
+  - 对称残差：0.0495 px
+  - 法向残差：2.999°
+  - Form-fit score：0.9408
+  - Form-fit elapsed：58 ms
+  - FormfitGauge：1 个元素、1 个闭合约束
+
+  默认方向极性已验证为成对配置：
+
+  Top / Bottom / Left / Right = 0 / 1 / 0 / 1
+
+  测试 values 中没有再显式指定四方向 method，证明该结果来自系统默认值，不是测试案例硬编码。
+
+  关键落地内容：
+
+  - FindLine 原始亚像素结论保持不丢失。
+  - ANN、Dijkstra 只筛选原结论点，不生成新的测量结论。
+  - 局部斜率来自相邻 FindLine 结论。
+  - Gauge 扫描轴在同一方向域内统一符号，A/B 极性来自已保存的 FindLine 领域极性。
+  - 仿射法向使用逆转置矩阵，支持非均匀缩放和 shear。
+  - 平滑轮廓采用受约束 Bezier 交界；明确直线折角才使用切线交点。
+  - FormfitGauge 只消费 FastMatch 数值快照，不反向持有或执行匹配器。
+  - GUI 已增加稠密采样、亚像素、双向 ANN、trim、迭代与预算等 Key Parameter Controls。
+  - line_trace.json 新增每方向 domain/compressed/ANN-selected 点集，便于人工分析。
+
+  主要 Evidence Case：
+
+  - FastMatch Form Fit Gauge Default Profile
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        result_summary.json
+
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        shape_model.json
+
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        formfit_correspondence.json
+
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        formfit_gauge.json
+
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        line_trace.json
+
+      - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+        run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+        evidence_overlay.png
+
+  构建产物：
+
+  - D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/build01/Release/cxvision_imgui_acceptance.exe
+
+  仍需单独验收的边界：旋转矩形案例目前暴露的是 rotated FindLine 有效源点覆盖不足，不是 FormfitGauge 接口失败。该失败已保
+  留为英文 Evidence Case FastMatch Rotated Gauge Form Fit，不计入 P6 接口闭环，但需要后续作为旋转 Gauge 专项回归继续解
+  决。测试原图未被写入或替换。
+  
+  已找到一组可直接供你专项分析的案例。建议先只看前两个，它们构成“基准成功 vs 旋转源点失败”的最小对照。
+
+   界面案例名称                            用途                                    重点看什么
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   FastMatch Form Fit Gauge Default        正常基准：圆形、默认成对极性、P6 全     四方向是否都有源点；黄色原结论点、青
+   Profile                                 链路成功                                色描线、红绿 A/B 对；Form-fit 指标
+  ──────────────────────────────────────  ──────────────────────────────────────  ──────────────────────────────────────
+   FastMatch Rotated Gauge Form Fit        旋转矩形专项失败：已实际走旋转 Gauge    哪个方向只有 1 个或很少的 FindLine
+                                           路径                                    结论；是否在 ANN/Dijkstra 前就缺点
+  ──────────────────────────────────────  ──────────────────────────────────────  ──────────────────────────────────────
+   FastMatch Rotated Direction Domains     对照：已修正旋转局部半平面分类，但尚    看原先上下左右如何错位、同一实体边被
+                                           未切到旋转 Gauge 几何                   分到错误方向
+  ──────────────────────────────────────  ──────────────────────────────────────  ──────────────────────────────────────
+   FastMatch Form Fit Gauge Angle Prior    对照：传入角度先验但旧 setrect() 不     证明“角度已存在”不等于“实际扫描几何
+                                           旋转扫描带                              已旋转”
+  ──────────────────────────────────────  ──────────────────────────────────────  ──────────────────────────────────────
+   FastMatch Image Angle Convention        角度正负号对照                          用于观察屏幕 Y 向下坐标系下的旋转符
+                                                                                   号效果
+
+  建议人工按这个顺序分析：
+
+  1. 打开 FastMatch Form Fit Gauge Default Profile，确认正常模式下的四层关系：
+     Gauge Line → 黄色源结论 → ANN 点域 → 青色连续描线 → 红/绿法向对。
+
+  2. 再打开 FastMatch Rotated Gauge Form Fit，不要先看 Formfit；先看 line_trace.json 的四组：
+      - domain_points_by_direction
+      - compressed_points_by_direction
+      - ann_selected_points_by_direction
+      - ann_edge_counts / ann_component_counts
+
+  3. 若某方向在 compressed 前就只有 1 个点，问题在 FindLine 旋转扫描、候选峰值或 Point Column 选择；
+     若 compressed 足够但 ANN selected 少，问题在邻域连通、局部斜率或领域法向一致性；
+     若四域都完整、但无法闭合，才看 junction/Dijkstra。
+
+  关键 Evidence 文件：
+
+  - 成功基准：D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+    result_summary.json、D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/line_trace.json、
+    D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260915_170000_fastmatch_formfit_p6_default_profile/FastMatch Form Fit Gauge Default Profile/
+    evidence_overlay.png。
+
+  - 旋转失败专项：D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260915_140000_fastmatch_formfit_p6_rotated_gauge/FastMatch Rotated Gauge Form Fit/result_summary.json、D:/
+    Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/run_20260915_140000_fastmatch_formfit_p6_rotated_gauge/
+    FastMatch Rotated Gauge Form Fit/line_trace.json、D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/headless/
+    run_20260915_140000_fastmatch_formfit_p6_rotated_gauge/FastMatch Rotated Gauge Form Fit/evidence_overlay.png。
+
+  补充：仓库里的 cxparser/cxscript/module/cximage/fastmatch_scanrotation_test.cxsc 是旧旋转验证脚本，目前存在重复
+  fastmatch_action 声明、固定 15° 后又被全局角度覆盖的问题；不建议用它做本轮人工判断。当前应以以上 Evidence Case 为准。
+
+
+已修正并编译完成。
+
+  - Headless FastMatch 输出目录会自动成为 Evidence Case，不再依赖写死案例名。
+  - 可见英文案例包括：
+      - FastMatch Form Fit Gauge Default Profile
+      - FastMatch Rotated Gauge Form Fit
+
+  - 选中案例后，Evidence 面板会显示 FastMatch Normal-Trace / ANN Evidence，按 Top / Bottom / Left / Right 展示：
+      - domain_points_by_direction
+      - compressed_points_by_direction
+      - ann_selected_points_by_direction
+      - ann_edge_counts
+      - ann_component_counts
+      - Normal A/B pair count
+
+  - 每个方向可展开查看三类点集的坐标摘要；完整原始数据仍保留在该案例的只读 line_trace.json。
+  - 原测试图未修改；缩略图仅使用独立的 evidence_overlay.png。
+
+  COMPILE_PASS
+  二进制：D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/build01/Release/cxvision_imgui_acceptance.exe
+
+  请重启程序后进入 Manual Review / Evidence → FastMatch → To Verify，展开对应运行目录并选择上述案例。人工 GUI 显示复核尚
+  待执行。

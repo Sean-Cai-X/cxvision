@@ -492,6 +492,90 @@ FormfitGauge MakeCircleRingLineGauge(
     gauge.learn_score = (gauge.learn_score + 1.0) * 0.5;
     return gauge;
 }
+
+GaugeElement MakeFastMatchFormFitGaugeElement(
+    const CxFastMatchFormFitResult& fit_result,
+    const CxFastMatchShapeModel& observed_model,
+    const char* element_id,
+    const char* source_entity_id)
+{
+    GaugeElement element;
+    element.element_id = element_id ? element_id : "fastmatch_form_fit";
+    element.element_type = GaugeElementType::PointSet;
+    element.source_entity_id = source_entity_id ? source_entity_id :
+        observed_model.model_id;
+    element.confidence = ClampConfidence(fit_result.score);
+    element.bbox_x = FiniteOr(observed_model.bbox_x, 0.0);
+    element.bbox_y = FiniteOr(observed_model.bbox_y, 0.0);
+    element.bbox_width = ClampNonNegative(observed_model.bbox_width);
+    element.bbox_height = ClampNonNegative(observed_model.bbox_height);
+    const double span = std::max({1.0, element.bbox_width, element.bbox_height});
+    element.variables.push_back(MakeVariable(
+        "form_fit.translate_x", fit_result.translate_x, -span * 4.0, span * 4.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.translate_y", fit_result.translate_y, -span * 4.0, span * 4.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.angle_deg", fit_result.angle_deg, -180.0, 180.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.scale_x", fit_result.scale_x, 0.05, 20.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.scale_y", fit_result.scale_y, 0.05, 20.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.symmetric_residual_px",
+        ClampNonNegative(fit_result.symmetric_residual_px), 0.0, span));
+    element.variables.push_back(MakeVariable(
+        "form_fit.normal_residual_deg",
+        ClampNonNegative(fit_result.normal_residual_deg), 0.0, 180.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.mutual_coverage", fit_result.mutual_coverage, 0.0, 1.0));
+    element.variables.push_back(MakeVariable(
+        "form_fit.mutual_count", fit_result.dense_mutual_count, 0.0,
+        std::max(1, fit_result.reference_dense_count), 1.0, true));
+    return element;
+}
+
+FormfitGauge MakeFastMatchFormFitGauge(
+    const CxFastMatchFormFitResult& fit_result,
+    const CxFastMatchShapeModel& reference_model,
+    const CxFastMatchShapeModel& observed_model,
+    const char* gauge_id,
+    const char* name)
+{
+    FormfitGauge gauge = MakeGauge(gauge_id, name);
+    gauge.elements.push_back(MakeFastMatchFormFitGaugeElement(
+        fit_result, observed_model, "fastmatch_form_fit", observed_model.model_id.c_str()));
+    gauge.learn_score = ClampConfidence(fit_result.score);
+    gauge.overall_tolerance = std::max(
+        0.25, ClampNonNegative(fit_result.symmetric_residual_px, 1.0) * 2.0);
+
+    GaugeConstraint closure;
+    closure.constraint_id = "fastmatch_form_fit.closure";
+    closure.target_element_id = "fastmatch_form_fit";
+    closure.constraint_type = GaugeConstraintType::Closure;
+    closure.target_value = 0.0;
+    closure.tolerance = gauge.overall_tolerance;
+    closure.weight = 1.0;
+    gauge.constraints.push_back(closure);
+
+    const bool has_symmetry_anchor = std::any_of(
+        reference_model.anchors.begin(), reference_model.anchors.end(),
+        [](const CxFastMatchStructuralAnchor& anchor) {
+            return anchor.type == CxFastMatchStructuralAnchorType::SymmetryPair;
+        });
+    if (has_symmetry_anchor)
+    {
+        GaugeConstraint symmetry;
+        symmetry.constraint_id = "fastmatch_form_fit.symmetry";
+        symmetry.target_element_id = "fastmatch_form_fit";
+        symmetry.constraint_type = GaugeConstraintType::Symmetry;
+        symmetry.target_value = 0.0;
+        symmetry.tolerance = std::max(1.0, gauge.overall_tolerance);
+        symmetry.weight = 0.75;
+        gauge.constraints.push_back(symmetry);
+    }
+    return gauge;
+}
+
 FitTaskSpec MakeTaskSpecFromGauge(const FormfitGauge& gauge, const char* task_id, FitTaskType task_type)
 {
     FitTaskSpec task = MakeFitTaskSpec(task_id ? task_id : gauge.gauge_id.c_str(), task_type);
