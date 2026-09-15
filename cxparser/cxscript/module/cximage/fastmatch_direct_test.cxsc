@@ -228,7 +228,12 @@ m_match.setnormaltraceenabled(global_fastmatch_normaltrace_enabled);
 // invokes Param_int_N in reverse. Keep FastMatch's C++ API unchanged and list
 // the source arguments in dispatch order so the C++ object receives the
 // operator-facing order documented in Key Parameter Controls.
-m_match.setnormaltraceparams(global_fastmatch_normaltrace_pair_offset_px,
+// compare_gap is the authoritative keypoint-to-A/B offset for both the
+// directional Point Column and Normal-Trace learn paths (total A-B is 2x).
+// The legacy
+// global_fastmatch_normaltrace_pair_offset_px remains loadable in old
+// snapshots but must not override the operator's compare-gap edit.
+m_match.setnormaltraceparams(compare_gap,
     global_fastmatch_normaltrace_max_nodes,
     global_fastmatch_normaltrace_min_gradient,
     global_fastmatch_normaltrace_overlap_radius_px);

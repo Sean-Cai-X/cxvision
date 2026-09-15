@@ -236,6 +236,7 @@ private:
   int AddGeometryAugmentationDatasetForCurrentSelection();
   bool RunGeometryAugmentationTrainingPrepFromGui(std::string& reason);
   bool RunYoloV8nIncrementalTrainingFromGui(std::string& reason);
+  bool RunYoloV8nSelectedImageInferenceFromGui(std::string& reason);
 
   void CaptureCurrentTorchTrainingAnnotationState();
   void RestoreTorchTrainingAnnotationState(

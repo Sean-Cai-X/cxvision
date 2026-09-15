@@ -1363,3 +1363,68 @@ Target
    - APPROVED：数量/类别/精度指标达标且无不可控退化；
    - ACTIVE：仅在业务人工批准后允许外部推理。
 当前正在第 1 步。本轮结果决定第 2 步的具体自整定参数包；在单目标输出未接近 1、且缺少 holdout 前，状态不得超过 CANDIDATE / EVALUATED_PENDING。
+
+ Vision-AI 下一步应读取cxparser/cxscript/module/cximage/evidence/vision_ai_handoff/handoff_20260915_v1/
+  vision_ai_development_parent_import.json，将七类模型作为不可变的 DEVELOPMENT_ONLY 父模型导入，然后由人工选择业务案例、绑定该
+  案例自己的 ROI/标注/数据版本，在隔离命名空间运行小样本增量训练和内部推理验证。成功后另开正式准入流程，失败则回滚，不污染正式
+  模型库。
+已整理完成。Evidence 资产根已登记 model_analysis_cases，当前三个模型各有一个独立、可人工分析的案例，均为只读诊断案例，
+  training_enabled=0，不会误触发生产准入。
+
+  在 Manual Review / Evidence → Evidence 中展开 Geometry Reference / Asset Cases 后，按以下名称点击：
+
+   当前模型                                  Evidence → Case / 用例名称                人工研判重点
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   C++ YOLOv8-n AABB Functional Base         C++ YOLOv8-n AABB Functional Base —       单目标数量、AABB 覆盖、背景混淆
+                                             Rectangle Boundary Analysis
+  ────────────────────────────────────────  ────────────────────────────────────────  ─────────────────────────────────────────
+   C++ YOLOv8-n AABB Incremental             C++ YOLOv8-n AABB Incremental             重复框、分类混淆、父子回归
+   Candidate                                 Candidate — Circle Boundary Analysis
+  ────────────────────────────────────────  ────────────────────────────────────────  ─────────────────────────────────────────
+   Seven-Class Geometry Warmup               Seven-Class Geometry Warmup               七类边界语义、旋转/缩放风险、Geometry
+   Development Parent                        Development Parent — Ellipse Boundary     Head 尚未 learned 的边界
+                                             Analysis
+
+  案例索引在：
+
+  D:/Codex-WorkDir/Sean_WorkDir/cxvisionai/cxscript_runs/model_analysis_cases/
+  run_20260915_170000_current_model_manual_analysis/manual_model_case_index.json
+
+  完整人工操作说明已交接到：
+
+  cxparser/cxscript/module/cximage/evidence/vision_ai_handoff/handoff_20260915_v1/MANUAL_CASE_WORKFLOW.md
+
+  核心操作链路如下：
+
+  Evidence 选择案例
+    → F9 打开 Torch Training Image Set
+    → Sync Selected Evidence Case / 添加图片到 Train、Val
+    → Annotation Tools 标注 ROI、业务类、几何类和实例
+    → 划分 source-disjoint Train / Validation / Holdout
+    → Export Training Dataset
+    → 检查训练参数、父模型与增强通道
+    → 真实训练并保存 best checkpoint / 日志 / 回执
+    → 固定 Validation + 困难样本 + Holdout 推理评估
+    → 数量 → 类别 → 区域精度 逐层判定
+    → 形成子模型或回滚
+
+  关键规则：
+
+  - Train、Validation、Holdout 必须源图不相交；旋转、缩放、模糊等只可扩增 Train，不能污染固定验证或 Holdout。
+  - 标注的是可见边界；业务类别与几何类别必须分开。例如“药袋边界”是业务类，ellipse 是几何属性。
+  - 七类固定为：arc / circle / ellipse / line / open_curve / polygon / closed_curve。
+  - 导出数据集成功仅表示数据包可复核，不代表已训练。
+  - 推理先看数量契约，再看类别契约，最后看区域/轮廓精度。
+  - 当前检测 GUI 的 Run C++ Incremental Training 仅适用于已确认的 detection release 节点。
+  - 七类 Geometry 开发父模型必须由 Vision-AI 路由至 segmentation 子训练执行器，输出到隔离 DEVELOPMENT_TRIAL_* child run；不得自
+    动升为 APPROVED/ACTIVE。
+
+  校验已通过：
+
+  - EVIDENCE_CASE_ASSET_SCAN_PASS
+  - HANDOFF_JSON_AND_HASH_PASS
+  - MODEL_CASE_INDEX_PASS
+  - 三个案例名称在 C++ 中均为 0 处硬编码。
+
+  GUI 侧核对时检测到您的输入，我已停止继续注入按键，避免干扰当前操作；资产已注册，Evidence 刷新或程序重新打开后即可按上述名称查
+  看。

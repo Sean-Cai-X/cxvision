@@ -907,7 +907,7 @@ bool AppendCandidateToEvidenceChain(
     const std::string &scriptPath, const std::string &sourceEvidenceScriptPath,
     const std::string &imageId, const std::string &imagePath,
     const std::string &targetId, const std::string &tool,
-    const std::string &parameterSummary) {
+    const std::string &parameterSummary, bool allowNewRow) {
   auto bindCurrentCaseState = [&](auto &target) {
     target.candidate_id = result.candidate_id;
     target.candidate_dir = result.candidate_dir;
@@ -972,6 +972,36 @@ bool AppendCandidateToEvidenceChain(
   bindCurrentCaseState(thumb);
   if (thumb.primary_object_status.empty())
     thumb.primary_object_status = "unresolved";
+
+  // First bind a save back to the exact currently selected asset-backed row.
+  // The logical case name alone is not sufficient because identical names may
+  // exist in separate run directories.
+  const std::string selectedOrigin =
+      context.current_evidence_selection.evidence_output_root;
+  for (auto &group : context.script_evidence_groups) {
+    for (auto &existing : group.thumbs) {
+      const bool sameCase = !thumb.case_id.empty() &&
+                            thumb.case_id == existing.case_id;
+      const bool sameOrigin = selectedOrigin.empty() ||
+                              existing.evidence_output_root == selectedOrigin;
+      if (sameCase && sameOrigin) {
+        const std::string preservedOutputRoot = existing.evidence_output_root;
+        const std::string preservedReviewItem = existing.review_item;
+        const std::string preservedHead = existing.evidence_head_folder;
+        const std::string preservedFolder = existing.evidence_case_folder;
+        existing = thumb;
+        existing.evidence_output_root = preservedOutputRoot;
+        existing.review_item = preservedReviewItem;
+        existing.evidence_head_folder = preservedHead;
+        existing.evidence_case_folder = preservedFolder;
+        context.script_evidence_row_refs_dirty = true;
+        return false;
+      }
+    }
+  }
+
+  if (!allowNewRow)
+    return false;
 
   const std::string groupLabel = EvidenceToolGroupLabel(tool);
   ScriptEvidenceGroup *groupPtr = nullptr;
@@ -1476,11 +1506,12 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
         "current case state updated; working_state=" + result.candidate_id;
   }
 
-  if (options.add_to_evidence_chain) {
+  {
     const bool caseRowAdded = AppendCandidateToEvidenceChain(
         context, result, caseId, scriptId, scriptSnapshotPath.string(),
         ResolveWorkspaceFile(sourceEvidenceScriptPath).string(), imageId,
-        imagePath, targetId, tool, parameterSummary);
+        imagePath, targetId, tool, parameterSummary,
+        options.add_to_evidence_chain);
     AppendEvidenceCandidateStateProbe(
         context, result.candidate_dir, result.candidate_id,
         "current_case_updated", "available",
@@ -1492,8 +1523,8 @@ bool SaveEvidenceCandidatePackage(ManualTestContext &context,
           "current Development case was added to Evidence Chain");
     } else {
       AppendEvidenceCandidateStateProbe(
-          context, result.candidate_dir, result.candidate_id,
-          "case_row_updated", "stable_list",
+        context, result.candidate_dir, result.candidate_id,
+        "case_row_updated", "stable_list",
           "current Development case was bound to the existing Evidence row; "
           "case list remains unchanged");
     }

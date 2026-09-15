@@ -856,7 +856,11 @@ void SeedDefaultManualGlobals(ManualTestContext &context,
           horizontal_edge ? 8 : 2);
       set(("global_fastmatch_learn_hgap" + suffix).c_str(),
           horizontal_edge ? 2 : 8);
-      set(("global_fastmatch_learn_method" + suffix).c_str(), 0);
+      // A FastMatch direction stores the native FindLine transition method.
+      // Opposite physical sides are scanned on the same oriented Gauge axis,
+      // so their exterior transitions must start with opposite methods.
+      set(("global_fastmatch_learn_method" + suffix).c_str(),
+          (dir == 1 || dir == 3) ? 1 : 0);
       set(("global_fastmatch_learn_threshold" + suffix).c_str(), 20);
       set(("global_fastmatch_learn_linegap" + suffix).c_str(), 6);
       set(("global_fastmatch_learn_objfilter" + suffix).c_str(), 1);
@@ -1521,6 +1525,8 @@ void ViewController::RefreshRuntimeObjectTable(
           probe.params.selected_edge;
       object.fastmatch_directional_probe_runtime_selected_edge[static_cast<std::size_t>(direction)] =
           probe.runtime_selected_edge;
+      object.fastmatch_directional_probe_compare_gap[static_cast<std::size_t>(direction)] =
+          probe.params.compare_gap;
       object.fastmatch_directional_probe_status[static_cast<std::size_t>(direction)] =
           probe.status;
     }
@@ -2027,6 +2033,22 @@ void ViewController::drawKeyParameterControlsWindow() {
     CxEvidenceCandidateSaveOptions options;
     options.mode = requestRun ? "run_requested" : "draft";
     options.request_run = requestRun;
+    // An asset-backed Evidence case owns one mutable working state below its
+    // own package.  Saving edits must update that state rather than create a
+    // second Evidence row under the global candidate library.
+    const CxEvidenceSelectionSnapshot &selection =
+        m_manualTest.current_evidence_selection;
+    if (selection.valid && !selection.evidence_output_root.empty()) {
+      const std::filesystem::path assetRoot(selection.evidence_output_root);
+      std::error_code assetError;
+      if (std::filesystem::is_regular_file(assetRoot / "case_manifest.json",
+                                           assetError)) {
+        options.root_dir = (assetRoot / "working_state").string();
+        options.add_to_evidence_chain = false;
+        options.mode = requestRun ? "asset_working_state_run_requested"
+                                  : "asset_working_state_draft";
+      }
+    }
     CxEvidenceCandidateSaveResult result;
     if (!SaveEvidenceCandidatePackage(m_manualTest, options, result)) {
       m_manualTest.debug_status = "EVIDENCE_CANDIDATE_SAVE_FAILED";

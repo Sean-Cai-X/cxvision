@@ -1,8 +1,8 @@
 CxScript Debug Snapshot
 =======================
-time: 2026-09-15T15:28:57
+time: 2026-09-15T17:44:40
 flow_block: cximage_find_circle_explore.N0
-script_path: D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxvision_repo\cxparser\cxscript\module\cximage\fastmatch_direct_test.cxsc
+script_path: D:\Codex-WorkDir\Sean_WorkDir\cxvisionai\cxscript_runs\manual_test_queue/fastmatch_five_20260915\04_formfit_default_profile\script_snapshot.cxsc
 run_state: runtime_finished
 runtime_current_status: PENDING
 debug_status: runtime_executed
@@ -30,17 +30,17 @@ status: runtime_object_available
 reason: 
 fit: (0, 0, r=0)
 avgdist: 0
-points_count: 64
-valid_points_count: 0
+points_count: 32
+valid_points_count: 1
 
 Geometry Summary
 ----------------
-geometry: object=m_match | tool=fastmatch | model_points=64 | learnA=64 | learnB=64 | learnA2=0 | learnB2=0 | learn_status=34 | patternA=64 | patternB=64 | candidates=0 | best_score=0 | result_ref=runtime_object:m_match | status=runtime_object_available
+geometry: object=m_match | tool=fastmatch | model_points=32 | learnA=0 | learnB=0 | learnA2=0 | learnB2=0 | learn_status=33 | patternA=32 | patternB=32 | candidates=1 | best_score=32 | result_ref=runtime_object:m_match | status=runtime_object_available
 
 
 Image Overlay Summary
 ---------------------
-image overlay: learn_roi=true | search_roi=true | model_points=64 | learnA=64 | learnB=64 | learnA2=0 | learnB2=0 | learn_status=34 | patternA=64 | patternB=64 | candidate_boxes=0 | stale=false | source_preview_enabled=false | manual_elements_count=0
+image overlay: learn_roi=true | search_roi=true | model_points=32 | learnA=0 | learnB=0 | learnA2=0 | learnB2=0 | learn_status=33 | patternA=32 | patternB=32 | candidate_boxes=1 | stale=false | source_preview_enabled=false | manual_elements_count=0
 
 
 Runtime Objects
@@ -52,12 +52,12 @@ Runtime Objects
   last_runtime_status: runtime_executed
   last_method: Manual Console Pending Run
   last_update_line: 0
-  display_summary: geometry: object=m_match | tool=fastmatch | model_points=64 | learnA=64 | learnB=64 | learnA2=0 | learnB2=0 | learn_status=34 | patternA=64 | patternB=64 | candidates=0 | best_score=0 | result_ref=runtime_object:m_match | status=runtime_object_available
+  display_summary: geometry: object=m_match | tool=fastmatch | model_points=32 | learnA=0 | learnB=0 | learnA2=0 | learnB2=0 | learn_status=33 | patternA=32 | patternB=32 | candidates=1 | best_score=32 | result_ref=runtime_object:m_match | status=runtime_object_available
   visualizable: true
   stale: false
   roi_circle: 0, 0, 0, 0
-  measure_points_count: 64
-  valid_points_count: 0
+  measure_points_count: 32
+  valid_points_count: 1
   fit_circle: 0, 0, r=0
   avgdist: 0
   display_version: 0
@@ -294,136 +294,141 @@ Line Trace
 228 [source_analyzed] // invokes Param_int_N in reverse. Keep FastMatch's C++ API unchanged and list | object=invokes | method= | params= | reason=not_executed
 229 [source_analyzed] // the source arguments in dispatch order so the C++ object receives the | object=the | method= | params= | reason=not_executed
 230 [source_analyzed] // operator-facing order documented in Key Parameter Controls. | object=operator-facing | method= | params= | reason=not_executed
-231 [source_analyzed] m_match.setnormaltraceparams(global_fastmatch_normaltrace_pair_offset_px, | object=m_match | method=setnormaltraceparams | params= | reason=not_executed
-232 [source_analyzed]     global_fastmatch_normaltrace_max_nodes, | object= | method= | params= | reason=not_executed
-233 [source_analyzed]     global_fastmatch_normaltrace_min_gradient, | object= | method= | params= | reason=not_executed
-234 [source_analyzed]     global_fastmatch_normaltrace_overlap_radius_px); | object= | method= | params= | reason=not_executed
-235 [source_analyzed] m_match.setnormaltracecosts( | object=m_match | method=setnormaltracecosts | params= | reason=not_executed
-236 [source_analyzed]     global_fastmatch_normaltrace_max_trace_gap_px, | object= | method= | params= | reason=not_executed
-237 [source_analyzed]     global_fastmatch_normaltrace_gap_weight_permille, | object= | method= | params= | reason=not_executed
-238 [source_analyzed]     global_fastmatch_normaltrace_turn_weight_permille, | object= | method= | params= | reason=not_executed
-239 [source_analyzed]     global_fastmatch_normaltrace_gradient_weight_permille); | object= | method= | params= | reason=not_executed
-240 [source_analyzed] m_match.setnormaltraceknn(global_fastmatch_normaltrace_knn_neighbors); | object=m_match | method=setnormaltraceknn | params=global_fastmatch_normaltrace_knn_neighbors | reason=not_executed
-241 [source_analyzed] m_match.setnormaltraceann( | object=m_match | method=setnormaltraceann | params= | reason=not_executed
-242 [source_analyzed]     global_fastmatch_normaltrace_ann_min_component_coverage_percent, | object= | method= | params= | reason=not_executed
-243 [source_analyzed]     global_fastmatch_normaltrace_ann_min_component_points, | object= | method= | params= | reason=not_executed
-244 [source_analyzed]     global_fastmatch_normaltrace_ann_normal_deviation_deg, | object= | method= | params= | reason=not_executed
-245 [source_analyzed]     global_fastmatch_normaltrace_ann_tangent_deviation_deg, | object= | method= | params= | reason=not_executed
-246 [source_analyzed]     global_fastmatch_normaltrace_ann_radius_px); | object= | method= | params= | reason=not_executed
-247 [source_analyzed] m_match.setnormaltracegeometry( | object=m_match | method=setnormaltracegeometry | params= | reason=not_executed
-248 [source_analyzed]     global_fastmatch_normaltrace_tangent_step_px, | object= | method= | params= | reason=not_executed
-249 [source_analyzed]     global_fastmatch_normaltrace_corner_rejection_px, | object= | method= | params= | reason=not_executed
-250 [source_analyzed]     global_fastmatch_normaltrace_polarity, | object= | method= | params= | reason=not_executed
-251 [source_analyzed]     global_fastmatch_normaltrace_min_length_px, | object= | method= | params= | reason=not_executed
-252 [source_analyzed]     global_fastmatch_normaltrace_angle_tolerance_deg); | object= | method= | params= | reason=not_executed
-253 [source_analyzed] m_match.setnormaltracedomain( | object=m_match | method=setnormaltracedomain | params= | reason=not_executed
-254 [source_analyzed]     global_fastmatch_normaltrace_min_keypoints_per_domain, | object= | method= | params= | reason=not_executed
-255 [source_analyzed]     global_fastmatch_normaltrace_xy_compression_bin_px, | object= | method= | params= | reason=not_executed
-256 [source_analyzed]     global_fastmatch_normaltrace_anchor_radius_px); | object= | method= | params= | reason=not_executed
-257 [source_analyzed] m_match.setnormaltracejunction( | object=m_match | method=setnormaltracejunction | params= | reason=not_executed
-258 [source_analyzed]     global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent, | object= | method= | params= | reason=not_executed
-259 [source_analyzed]     global_fastmatch_normaltrace_junction_max_extrapolation_percent, | object= | method= | params= | reason=not_executed
-260 [source_analyzed]     global_fastmatch_normaltrace_junction_min_cross_angle_deg, | object= | method= | params= | reason=not_executed
-261 [source_analyzed]     global_fastmatch_normaltrace_junction_tangent_window_points, | object= | method= | params= | reason=not_executed
-262 [source_analyzed]     global_fastmatch_normaltrace_endpoint_spike_ratio_percent); | object= | method= | params= | reason=not_executed
-263 [source_analyzed] m_match.setformfitenabled(global_fastmatch_formfit_enabled); | object=m_match | method=setformfitenabled | params=global_fastmatch_formfit_enabled | reason=not_executed
-264 [source_analyzed] // Fixed-int dispatch is reversed at Param_int_N; source order below therefore | object=Fixed-int | method= | params= | reason=not_executed
-265 [source_analyzed] // preserves the operator-facing order in FastMatch's C++ API. | object=preserves | method= | params= | reason=not_executed
-266 [source_analyzed] m_match.setformfitdenseparams( | object=m_match | method=setformfitdenseparams | params= | reason=not_executed
-267 [source_analyzed]     global_fastmatch_formfit_curvature_threshold_millideg, | object= | method= | params= | reason=not_executed
-268 [source_analyzed]     global_fastmatch_formfit_min_gradient, | object= | method= | params= | reason=not_executed
-269 [source_analyzed]     global_fastmatch_formfit_profile_step_milli_px, | object= | method= | params= | reason=not_executed
-270 [source_analyzed]     global_fastmatch_formfit_profile_half_width_milli_px, | object= | method= | params= | reason=not_executed
-271 [source_analyzed]     global_fastmatch_formfit_dense_step_milli_px); | object= | method= | params= | reason=not_executed
-272 [source_analyzed] m_match.setformfitannparams( | object=m_match | method=setformfitannparams | params= | reason=not_executed
-273 [source_analyzed]     global_fastmatch_formfit_max_iterations, | object= | method= | params= | reason=not_executed
-274 [source_analyzed]     global_fastmatch_formfit_min_mutual_pairs, | object= | method= | params= | reason=not_executed
-275 [source_analyzed]     global_fastmatch_formfit_trim_percent, | object= | method= | params= | reason=not_executed
-276 [source_analyzed]     global_fastmatch_formfit_normal_tolerance_deg, | object= | method= | params= | reason=not_executed
-277 [source_analyzed]     global_fastmatch_formfit_ann_radius_milli_px); | object= | method= | params= | reason=not_executed
-278 [source_analyzed] m_match.setformfitbudget( | object=m_match | method=setformfitbudget | params= | reason=not_executed
-279 [source_analyzed]     global_fastmatch_formfit_allow_affine, | object= | method= | params= | reason=not_executed
-280 [source_analyzed]     global_fastmatch_formfit_max_anchors, | object= | method= | params= | reason=not_executed
-281 [source_analyzed]     global_fastmatch_formfit_max_elapsed_ms); | object= | method= | params= | reason=not_executed
-282 [source_analyzed] m_match.setcalibrationtestenabled(calibration_test_enabled); | object=m_match | method=setcalibrationtestenabled | params=calibration_test_enabled | reason=not_executed
-283 [source_analyzed] if (calibration_test_enabled == 1) | object= | method=if | params=calibration_test_enabled == 1 | reason=not_executed
-284 [source_analyzed] { | object= | method= | params= | reason=not_executed
-285 [source_analyzed]     m_match.setcalibrationtestxytransformscaled( | object=m_match | method=setcalibrationtestxytransformscaled | params= | reason=not_executed
-286 [source_analyzed]         global_fastmatch_calibration_scale_x_ppm, | object= | method= | params= | reason=not_executed
-287 [source_analyzed]         global_fastmatch_calibration_scale_y_ppm, | object= | method= | params= | reason=not_executed
-288 [source_analyzed]         global_fastmatch_calibration_offset_x_milliunit, | object= | method= | params= | reason=not_executed
-289 [source_analyzed]         global_fastmatch_calibration_offset_y_milliunit, | object= | method= | params= | reason=not_executed
-290 [source_analyzed]         global_fastmatch_calibration_rotation_millideg, | object= | method= | params= | reason=not_executed
-291 [source_analyzed]         global_fastmatch_calibration_shear_x_ppm, | object= | method= | params= | reason=not_executed
-292 [source_analyzed]         global_fastmatch_calibration_shear_y_ppm); | object= | method= | params= | reason=not_executed
-293 [source_analyzed]     m_match.setcalibrationtestreprojectionrmse(calibration_reprojection_rmse_px); | object=m_match | method=setcalibrationtestreprojectionrmse | params=calibration_reprojection_rmse_px | reason=not_executed
-294 [source_analyzed] } | object= | method= | params= | reason=not_executed
-295 [source_analyzed]  | object= | method= | params= | reason=not_executed
-296 [source_analyzed] m_match.learn(&m_image); | object=m_match | method=learn | params=&m_image | reason=not_executed
-297 [source_analyzed] m_match.modelzero(); | object=m_match | method=modelzero | params= | reason=not_executed
-298 [source_analyzed] m_match.pattern2org(); | object=m_match | method=pattern2org | params= | reason=not_executed
-299 [source_analyzed] m_match.samplemodel(100); | object=m_match | method=samplemodel | params=100 | reason=not_executed
+231 [source_analyzed] // compare_gap is the authoritative keypoint-to-A/B offset for both the | object=compare_gap | method= | params= | reason=not_executed
+232 [source_analyzed] // directional Point Column and Normal-Trace learn paths (total A-B is 2x). | object= | method=// directional Point Column and Normal-Trace learn paths | params=total A-B is 2x | reason=not_executed
+233 [source_analyzed] // The legacy | object=The | method= | params= | reason=not_executed
+234 [source_analyzed] // global_fastmatch_normaltrace_pair_offset_px remains loadable in old | object=global_fastmatch_normaltrace_pair_offset_px | method= | params= | reason=not_executed
+235 [source_analyzed] // snapshots but must not override the operator's compare-gap edit. | object=snapshots | method= | params= | reason=not_executed
+236 [source_analyzed] m_match.setnormaltraceparams(compare_gap, | object=m_match | method=setnormaltraceparams | params= | reason=not_executed
+237 [source_analyzed]     global_fastmatch_normaltrace_max_nodes, | object= | method= | params= | reason=not_executed
+238 [source_analyzed]     global_fastmatch_normaltrace_min_gradient, | object= | method= | params= | reason=not_executed
+239 [source_analyzed]     global_fastmatch_normaltrace_overlap_radius_px); | object= | method= | params= | reason=not_executed
+240 [source_analyzed] m_match.setnormaltracecosts( | object=m_match | method=setnormaltracecosts | params= | reason=not_executed
+241 [source_analyzed]     global_fastmatch_normaltrace_max_trace_gap_px, | object= | method= | params= | reason=not_executed
+242 [source_analyzed]     global_fastmatch_normaltrace_gap_weight_permille, | object= | method= | params= | reason=not_executed
+243 [source_analyzed]     global_fastmatch_normaltrace_turn_weight_permille, | object= | method= | params= | reason=not_executed
+244 [source_analyzed]     global_fastmatch_normaltrace_gradient_weight_permille); | object= | method= | params= | reason=not_executed
+245 [source_analyzed] m_match.setnormaltraceknn(global_fastmatch_normaltrace_knn_neighbors); | object=m_match | method=setnormaltraceknn | params=global_fastmatch_normaltrace_knn_neighbors | reason=not_executed
+246 [source_analyzed] m_match.setnormaltraceann( | object=m_match | method=setnormaltraceann | params= | reason=not_executed
+247 [source_analyzed]     global_fastmatch_normaltrace_ann_min_component_coverage_percent, | object= | method= | params= | reason=not_executed
+248 [source_analyzed]     global_fastmatch_normaltrace_ann_min_component_points, | object= | method= | params= | reason=not_executed
+249 [source_analyzed]     global_fastmatch_normaltrace_ann_normal_deviation_deg, | object= | method= | params= | reason=not_executed
+250 [source_analyzed]     global_fastmatch_normaltrace_ann_tangent_deviation_deg, | object= | method= | params= | reason=not_executed
+251 [source_analyzed]     global_fastmatch_normaltrace_ann_radius_px); | object= | method= | params= | reason=not_executed
+252 [source_analyzed] m_match.setnormaltracegeometry( | object=m_match | method=setnormaltracegeometry | params= | reason=not_executed
+253 [source_analyzed]     global_fastmatch_normaltrace_tangent_step_px, | object= | method= | params= | reason=not_executed
+254 [source_analyzed]     global_fastmatch_normaltrace_corner_rejection_px, | object= | method= | params= | reason=not_executed
+255 [source_analyzed]     global_fastmatch_normaltrace_polarity, | object= | method= | params= | reason=not_executed
+256 [source_analyzed]     global_fastmatch_normaltrace_min_length_px, | object= | method= | params= | reason=not_executed
+257 [source_analyzed]     global_fastmatch_normaltrace_angle_tolerance_deg); | object= | method= | params= | reason=not_executed
+258 [source_analyzed] m_match.setnormaltracedomain( | object=m_match | method=setnormaltracedomain | params= | reason=not_executed
+259 [source_analyzed]     global_fastmatch_normaltrace_min_keypoints_per_domain, | object= | method= | params= | reason=not_executed
+260 [source_analyzed]     global_fastmatch_normaltrace_xy_compression_bin_px, | object= | method= | params= | reason=not_executed
+261 [source_analyzed]     global_fastmatch_normaltrace_anchor_radius_px); | object= | method= | params= | reason=not_executed
+262 [source_analyzed] m_match.setnormaltracejunction( | object=m_match | method=setnormaltracejunction | params= | reason=not_executed
+263 [source_analyzed]     global_fastmatch_normaltrace_junction_join_spacing_multiplier_percent, | object= | method= | params= | reason=not_executed
+264 [source_analyzed]     global_fastmatch_normaltrace_junction_max_extrapolation_percent, | object= | method= | params= | reason=not_executed
+265 [source_analyzed]     global_fastmatch_normaltrace_junction_min_cross_angle_deg, | object= | method= | params= | reason=not_executed
+266 [source_analyzed]     global_fastmatch_normaltrace_junction_tangent_window_points, | object= | method= | params= | reason=not_executed
+267 [source_analyzed]     global_fastmatch_normaltrace_endpoint_spike_ratio_percent); | object= | method= | params= | reason=not_executed
+268 [source_analyzed] m_match.setformfitenabled(global_fastmatch_formfit_enabled); | object=m_match | method=setformfitenabled | params=global_fastmatch_formfit_enabled | reason=not_executed
+269 [source_analyzed] // Fixed-int dispatch is reversed at Param_int_N; source order below therefore | object=Fixed-int | method= | params= | reason=not_executed
+270 [source_analyzed] // preserves the operator-facing order in FastMatch's C++ API. | object=preserves | method= | params= | reason=not_executed
+271 [source_analyzed] m_match.setformfitdenseparams( | object=m_match | method=setformfitdenseparams | params= | reason=not_executed
+272 [source_analyzed]     global_fastmatch_formfit_curvature_threshold_millideg, | object= | method= | params= | reason=not_executed
+273 [source_analyzed]     global_fastmatch_formfit_min_gradient, | object= | method= | params= | reason=not_executed
+274 [source_analyzed]     global_fastmatch_formfit_profile_step_milli_px, | object= | method= | params= | reason=not_executed
+275 [source_analyzed]     global_fastmatch_formfit_profile_half_width_milli_px, | object= | method= | params= | reason=not_executed
+276 [source_analyzed]     global_fastmatch_formfit_dense_step_milli_px); | object= | method= | params= | reason=not_executed
+277 [source_analyzed] m_match.setformfitannparams( | object=m_match | method=setformfitannparams | params= | reason=not_executed
+278 [source_analyzed]     global_fastmatch_formfit_max_iterations, | object= | method= | params= | reason=not_executed
+279 [source_analyzed]     global_fastmatch_formfit_min_mutual_pairs, | object= | method= | params= | reason=not_executed
+280 [source_analyzed]     global_fastmatch_formfit_trim_percent, | object= | method= | params= | reason=not_executed
+281 [source_analyzed]     global_fastmatch_formfit_normal_tolerance_deg, | object= | method= | params= | reason=not_executed
+282 [source_analyzed]     global_fastmatch_formfit_ann_radius_milli_px); | object= | method= | params= | reason=not_executed
+283 [source_analyzed] m_match.setformfitbudget( | object=m_match | method=setformfitbudget | params= | reason=not_executed
+284 [source_analyzed]     global_fastmatch_formfit_allow_affine, | object= | method= | params= | reason=not_executed
+285 [source_analyzed]     global_fastmatch_formfit_max_anchors, | object= | method= | params= | reason=not_executed
+286 [source_analyzed]     global_fastmatch_formfit_max_elapsed_ms); | object= | method= | params= | reason=not_executed
+287 [source_analyzed] m_match.setcalibrationtestenabled(calibration_test_enabled); | object=m_match | method=setcalibrationtestenabled | params=calibration_test_enabled | reason=not_executed
+288 [source_analyzed] if (calibration_test_enabled == 1) | object= | method=if | params=calibration_test_enabled == 1 | reason=not_executed
+289 [source_analyzed] { | object= | method= | params= | reason=not_executed
+290 [source_analyzed]     m_match.setcalibrationtestxytransformscaled( | object=m_match | method=setcalibrationtestxytransformscaled | params= | reason=not_executed
+291 [source_analyzed]         global_fastmatch_calibration_scale_x_ppm, | object= | method= | params= | reason=not_executed
+292 [source_analyzed]         global_fastmatch_calibration_scale_y_ppm, | object= | method= | params= | reason=not_executed
+293 [source_analyzed]         global_fastmatch_calibration_offset_x_milliunit, | object= | method= | params= | reason=not_executed
+294 [source_analyzed]         global_fastmatch_calibration_offset_y_milliunit, | object= | method= | params= | reason=not_executed
+295 [source_analyzed]         global_fastmatch_calibration_rotation_millideg, | object= | method= | params= | reason=not_executed
+296 [source_analyzed]         global_fastmatch_calibration_shear_x_ppm, | object= | method= | params= | reason=not_executed
+297 [source_analyzed]         global_fastmatch_calibration_shear_y_ppm); | object= | method= | params= | reason=not_executed
+298 [source_analyzed]     m_match.setcalibrationtestreprojectionrmse(calibration_reprojection_rmse_px); | object=m_match | method=setcalibrationtestreprojectionrmse | params=calibration_reprojection_rmse_px | reason=not_executed
+299 [source_analyzed] } | object= | method= | params= | reason=not_executed
 300 [source_analyzed]  | object= | method= | params= | reason=not_executed
-301 [source_analyzed] global_learn_a_count = m_match.getlearnacount(); | object=m_match | method=getlearnacount | params= | reason=not_executed
-302 [source_analyzed] global_learn_b_count = m_match.getlearnbcount(); | object=m_match | method=getlearnbcount | params= | reason=not_executed
-303 [source_analyzed] global_learn_a2_count = m_match.getlearna2count(); | object=m_match | method=getlearna2count | params= | reason=not_executed
-304 [source_analyzed] global_learn_b2_count = m_match.getlearnb2count(); | object=m_match | method=getlearnb2count | params= | reason=not_executed
-305 [source_analyzed] global_learn_status_code = m_match.getlearnstatuscode(); | object=m_match | method=getlearnstatuscode | params= | reason=not_executed
-306 [source_analyzed] global_model_point_count = m_match.getmodelpointcount(); | object=m_match | method=getmodelpointcount | params= | reason=not_executed
-307 [source_analyzed] global_normal_trace_candidate_count = m_match.getnormaltracecandidatecount(); | object=m_match | method=getnormaltracecandidatecount | params= | reason=not_executed
-308 [source_analyzed] global_normal_trace_deduplicated_count = m_match.getnormaltracededuplicatedcount(); | object=m_match | method=getnormaltracededuplicatedcount | params= | reason=not_executed
-309 [source_analyzed] global_normal_trace_point_count = m_match.getnormaltracepointcount(); | object=m_match | method=getnormaltracepointcount | params= | reason=not_executed
-310 [source_analyzed] global_normal_trace_pair_count = m_match.getnormaltracepaircount(); | object=m_match | method=getnormaltracepaircount | params= | reason=not_executed
-311 [source_analyzed] global_match_count = 0; | object= | method= | params= | reason=not_executed
-312 [source_analyzed] global_candidate_count = 0; | object= | method= | params= | reason=not_executed
-313 [source_analyzed] global_best_score = 0; | object= | method= | params= | reason=not_executed
-314 [source_analyzed]  | object= | method= | params= | reason=not_executed
-315 [source_analyzed] int should_match = 1; | object=should_match | method= | params= | reason=not_executed
-316 [source_analyzed] if (fastmatch_action == 1) | object= | method=if | params=fastmatch_action == 1 | reason=not_executed
-317 [source_analyzed] { | object= | method= | params= | reason=not_executed
-318 [source_analyzed]     should_match = 0; | object= | method= | params= | reason=not_executed
-319 [source_analyzed] } | object= | method= | params= | reason=not_executed
-320 [source_analyzed]  | object= | method= | params= | reason=not_executed
-321 [source_analyzed] if (should_match == 1) | object= | method=if | params=should_match == 1 | reason=not_executed
+301 [source_analyzed] m_match.learn(&m_image); | object=m_match | method=learn | params=&m_image | reason=not_executed
+302 [source_analyzed] m_match.modelzero(); | object=m_match | method=modelzero | params= | reason=not_executed
+303 [source_analyzed] m_match.pattern2org(); | object=m_match | method=pattern2org | params= | reason=not_executed
+304 [source_analyzed] m_match.samplemodel(100); | object=m_match | method=samplemodel | params=100 | reason=not_executed
+305 [source_analyzed]  | object= | method= | params= | reason=not_executed
+306 [source_analyzed] global_learn_a_count = m_match.getlearnacount(); | object=m_match | method=getlearnacount | params= | reason=not_executed
+307 [source_analyzed] global_learn_b_count = m_match.getlearnbcount(); | object=m_match | method=getlearnbcount | params= | reason=not_executed
+308 [source_analyzed] global_learn_a2_count = m_match.getlearna2count(); | object=m_match | method=getlearna2count | params= | reason=not_executed
+309 [source_analyzed] global_learn_b2_count = m_match.getlearnb2count(); | object=m_match | method=getlearnb2count | params= | reason=not_executed
+310 [source_analyzed] global_learn_status_code = m_match.getlearnstatuscode(); | object=m_match | method=getlearnstatuscode | params= | reason=not_executed
+311 [source_analyzed] global_model_point_count = m_match.getmodelpointcount(); | object=m_match | method=getmodelpointcount | params= | reason=not_executed
+312 [source_analyzed] global_normal_trace_candidate_count = m_match.getnormaltracecandidatecount(); | object=m_match | method=getnormaltracecandidatecount | params= | reason=not_executed
+313 [source_analyzed] global_normal_trace_deduplicated_count = m_match.getnormaltracededuplicatedcount(); | object=m_match | method=getnormaltracededuplicatedcount | params= | reason=not_executed
+314 [source_analyzed] global_normal_trace_point_count = m_match.getnormaltracepointcount(); | object=m_match | method=getnormaltracepointcount | params= | reason=not_executed
+315 [source_analyzed] global_normal_trace_pair_count = m_match.getnormaltracepaircount(); | object=m_match | method=getnormaltracepaircount | params= | reason=not_executed
+316 [source_analyzed] global_match_count = 0; | object= | method= | params= | reason=not_executed
+317 [source_analyzed] global_candidate_count = 0; | object= | method= | params= | reason=not_executed
+318 [source_analyzed] global_best_score = 0; | object= | method= | params= | reason=not_executed
+319 [source_analyzed]  | object= | method= | params= | reason=not_executed
+320 [source_analyzed] int should_match = 1; | object=should_match | method= | params= | reason=not_executed
+321 [source_analyzed] if (fastmatch_action == 1) | object= | method=if | params=fastmatch_action == 1 | reason=not_executed
 322 [source_analyzed] { | object= | method= | params= | reason=not_executed
-323 [source_analyzed]     if (transform_enabled == 1) | object= | method=if | params=transform_enabled == 1 | reason=not_executed
-324 [source_analyzed]     { | object= | method= | params= | reason=not_executed
-325 [source_analyzed]         m_match.transformmatch(&m_image); | object=m_match | method=transformmatch | params=&m_image | reason=not_executed
-326 [source_analyzed]     } | object= | method= | params= | reason=not_executed
-327 [source_analyzed]     else | object= | method= | params= | reason=not_executed
-328 [source_analyzed]     { | object= | method= | params= | reason=not_executed
-329 [source_analyzed]         m_match.match(&m_image); | object=m_match | method=match | params=&m_image | reason=not_executed
-330 [source_analyzed]     } | object= | method= | params= | reason=not_executed
-331 [source_analyzed]  | object= | method= | params= | reason=not_executed
-332 [source_analyzed]     global_match_count = m_match.getresultcandidatecount(); | object=m_match | method=getresultcandidatecount | params= | reason=not_executed
-333 [source_analyzed]     global_candidate_count = global_match_count; | object= | method= | params= | reason=not_executed
-334 [source_analyzed]     global_best_score = m_match.getresultbestscore(); | object=m_match | method=getresultbestscore | params= | reason=not_executed
-335 [source_analyzed]     global_fastmatch_transform_executed = m_match.gettransformsearchexecuted(); | object=m_match | method=gettransformsearchexecuted | params= | reason=not_executed
-336 [source_analyzed]     global_fastmatch_transform_converged = m_match.gettransformsearchconverged(); | object=m_match | method=gettransformsearchconverged | params= | reason=not_executed
-337 [source_analyzed]     global_fastmatch_transform_budget_exceeded = m_match.gettransformsearchbudgetexceeded(); | object=m_match | method=gettransformsearchbudgetexceeded | params= | reason=not_executed
-338 [source_analyzed]     global_fastmatch_transform_candidate_count = m_match.gettransformsearchcandidatecount(); | object=m_match | method=gettransformsearchcandidatecount | params= | reason=not_executed
-339 [source_analyzed]     global_fastmatch_transform_sample_count = m_match.gettransformsearchsamplecount(); | object=m_match | method=gettransformsearchsamplecount | params= | reason=not_executed
-340 [source_analyzed]     global_fastmatch_transform_elapsed_ms = m_match.gettransformsearchelapsedms(); | object=m_match | method=gettransformsearchelapsedms | params= | reason=not_executed
-341 [source_analyzed]     global_fastmatch_transform_best_score_permille = m_match.gettransformsearchscore() * 1000; | object=m_match | method=gettransformsearchscore | params= | reason=not_executed
-342 [source_analyzed]     global_fastmatch_transform_best_scale_x_permille = m_match.gettransformsearchscalex() * 1000; | object=m_match | method=gettransformsearchscalex | params= | reason=not_executed
-343 [source_analyzed]     global_fastmatch_transform_best_scale_y_permille = m_match.gettransformsearchscaley() * 1000; | object=m_match | method=gettransformsearchscaley | params= | reason=not_executed
-344 [source_analyzed]     global_fastmatch_transform_best_angle_deg = m_match.gettransformsearchangle(); | object=m_match | method=gettransformsearchangle | params= | reason=not_executed
-345 [source_analyzed]     global_fastmatch_transform_best_shear_permille = m_match.gettransformsearchshear() * 1000; | object=m_match | method=gettransformsearchshear | params= | reason=not_executed
-346 [source_analyzed]     global_fastmatch_transform_best_projective_u_permille = m_match.gettransformsearchprojectiveu() * 1000; | object=m_match | method=gettransformsearchprojectiveu | params= | reason=not_executed
-347 [source_analyzed]     global_fastmatch_transform_best_projective_v_permille = m_match.gettransformsearchprojectivev() * 1000; | object=m_match | method=gettransformsearchprojectivev | params= | reason=not_executed
-348 [source_analyzed]     global_fastmatch_transform_gradient_score_permille = m_match.gettransformsearchgradientscore() * 1000; | object=m_match | method=gettransformsearchgradientscore | params= | reason=not_executed
-349 [source_analyzed]     global_fastmatch_transform_geometric_residual_milli_px = m_match.gettransformsearchresidual() * 1000; | object=m_match | method=gettransformsearchresidual | params= | reason=not_executed
-350 [source_analyzed]     global_fastmatch_transform_rigid_baseline_score_permille = m_match.gettransformsearchrigidbaselinescore() * 1000; | object=m_match | method=gettransformsearchrigidbaselinescore | params= | reason=not_executed
-351 [source_analyzed]     global_fastmatch_transform_calibration_applied = m_match.gettransformsearchcalibrationapplied(); | object=m_match | method=gettransformsearchcalibrationapplied | params= | reason=not_executed
-352 [source_analyzed]     global_fastmatch_transform_calibration_reprojection_rmse_milli_px = m_match.gettransformsearchcalibrationreprojectionrmse() * 1000; | object=m_match | method=gettransformsearchcalibrationreprojectionrmse | params= | reason=not_executed
-353 [source_analyzed]     global_fastmatch_transform_best_physical_cx_milliunit = m_match.gettransformsearchphysicalcx() * 1000; | object=m_match | method=gettransformsearchphysicalcx | params= | reason=not_executed
-354 [source_analyzed]     global_fastmatch_transform_best_physical_cy_milliunit = m_match.gettransformsearchphysicalcy() * 1000; | object=m_match | method=gettransformsearchphysicalcy | params= | reason=not_executed
-355 [source_analyzed] } | object= | method= | params= | reason=not_executed
-356 [source_analyzed]  | object= | method= | params= | reason=not_executed
-357 [source_analyzed] global_fastmatch_formfit_status_code = m_match.getformfitstatuscode(); | object=m_match | method=getformfitstatuscode | params= | reason=not_executed
-358 [source_analyzed] global_fastmatch_formfit_reference_count = m_match.getformfitreferencecount(); | object=m_match | method=getformfitreferencecount | params= | reason=not_executed
-359 [source_analyzed] global_fastmatch_formfit_observed_count = m_match.getformfitobservedcount(); | object=m_match | method=getformfitobservedcount | params= | reason=not_executed
-360 [source_analyzed] global_fastmatch_formfit_mutual_count = m_match.getformfitmutualcount(); | object=m_match | method=getformfitmutualcount | params= | reason=not_executed
-361 [source_analyzed] global_fastmatch_formfit_anchor_count = m_match.getformfitanchorcount(); | object=m_match | method=getformfitanchorcount | params= | reason=not_executed
-362 [source_analyzed] global_fastmatch_formfit_score_permille = m_match.getformfitscore() * 1000; | object=m_match | method=getformfitscore | params= | reason=not_executed
-363 [source_analyzed] global_fastmatch_formfit_residual_milli_px = m_match.getformfitresidual() * 1000; | object=m_match | method=getformfitresidual | params= | reason=not_executed
+323 [source_analyzed]     should_match = 0; | object= | method= | params= | reason=not_executed
+324 [source_analyzed] } | object= | method= | params= | reason=not_executed
+325 [source_analyzed]  | object= | method= | params= | reason=not_executed
+326 [source_analyzed] if (should_match == 1) | object= | method=if | params=should_match == 1 | reason=not_executed
+327 [source_analyzed] { | object= | method= | params= | reason=not_executed
+328 [source_analyzed]     if (transform_enabled == 1) | object= | method=if | params=transform_enabled == 1 | reason=not_executed
+329 [source_analyzed]     { | object= | method= | params= | reason=not_executed
+330 [source_analyzed]         m_match.transformmatch(&m_image); | object=m_match | method=transformmatch | params=&m_image | reason=not_executed
+331 [source_analyzed]     } | object= | method= | params= | reason=not_executed
+332 [source_analyzed]     else | object= | method= | params= | reason=not_executed
+333 [source_analyzed]     { | object= | method= | params= | reason=not_executed
+334 [source_analyzed]         m_match.match(&m_image); | object=m_match | method=match | params=&m_image | reason=not_executed
+335 [source_analyzed]     } | object= | method= | params= | reason=not_executed
+336 [source_analyzed]  | object= | method= | params= | reason=not_executed
+337 [source_analyzed]     global_match_count = m_match.getresultcandidatecount(); | object=m_match | method=getresultcandidatecount | params= | reason=not_executed
+338 [source_analyzed]     global_candidate_count = global_match_count; | object= | method= | params= | reason=not_executed
+339 [source_analyzed]     global_best_score = m_match.getresultbestscore(); | object=m_match | method=getresultbestscore | params= | reason=not_executed
+340 [source_analyzed]     global_fastmatch_transform_executed = m_match.gettransformsearchexecuted(); | object=m_match | method=gettransformsearchexecuted | params= | reason=not_executed
+341 [source_analyzed]     global_fastmatch_transform_converged = m_match.gettransformsearchconverged(); | object=m_match | method=gettransformsearchconverged | params= | reason=not_executed
+342 [source_analyzed]     global_fastmatch_transform_budget_exceeded = m_match.gettransformsearchbudgetexceeded(); | object=m_match | method=gettransformsearchbudgetexceeded | params= | reason=not_executed
+343 [source_analyzed]     global_fastmatch_transform_candidate_count = m_match.gettransformsearchcandidatecount(); | object=m_match | method=gettransformsearchcandidatecount | params= | reason=not_executed
+344 [source_analyzed]     global_fastmatch_transform_sample_count = m_match.gettransformsearchsamplecount(); | object=m_match | method=gettransformsearchsamplecount | params= | reason=not_executed
+345 [source_analyzed]     global_fastmatch_transform_elapsed_ms = m_match.gettransformsearchelapsedms(); | object=m_match | method=gettransformsearchelapsedms | params= | reason=not_executed
+346 [source_analyzed]     global_fastmatch_transform_best_score_permille = m_match.gettransformsearchscore() * 1000; | object=m_match | method=gettransformsearchscore | params= | reason=not_executed
+347 [source_analyzed]     global_fastmatch_transform_best_scale_x_permille = m_match.gettransformsearchscalex() * 1000; | object=m_match | method=gettransformsearchscalex | params= | reason=not_executed
+348 [source_analyzed]     global_fastmatch_transform_best_scale_y_permille = m_match.gettransformsearchscaley() * 1000; | object=m_match | method=gettransformsearchscaley | params= | reason=not_executed
+349 [source_analyzed]     global_fastmatch_transform_best_angle_deg = m_match.gettransformsearchangle(); | object=m_match | method=gettransformsearchangle | params= | reason=not_executed
+350 [source_analyzed]     global_fastmatch_transform_best_shear_permille = m_match.gettransformsearchshear() * 1000; | object=m_match | method=gettransformsearchshear | params= | reason=not_executed
+351 [source_analyzed]     global_fastmatch_transform_best_projective_u_permille = m_match.gettransformsearchprojectiveu() * 1000; | object=m_match | method=gettransformsearchprojectiveu | params= | reason=not_executed
+352 [source_analyzed]     global_fastmatch_transform_best_projective_v_permille = m_match.gettransformsearchprojectivev() * 1000; | object=m_match | method=gettransformsearchprojectivev | params= | reason=not_executed
+353 [source_analyzed]     global_fastmatch_transform_gradient_score_permille = m_match.gettransformsearchgradientscore() * 1000; | object=m_match | method=gettransformsearchgradientscore | params= | reason=not_executed
+354 [source_analyzed]     global_fastmatch_transform_geometric_residual_milli_px = m_match.gettransformsearchresidual() * 1000; | object=m_match | method=gettransformsearchresidual | params= | reason=not_executed
+355 [source_analyzed]     global_fastmatch_transform_rigid_baseline_score_permille = m_match.gettransformsearchrigidbaselinescore() * 1000; | object=m_match | method=gettransformsearchrigidbaselinescore | params= | reason=not_executed
+356 [source_analyzed]     global_fastmatch_transform_calibration_applied = m_match.gettransformsearchcalibrationapplied(); | object=m_match | method=gettransformsearchcalibrationapplied | params= | reason=not_executed
+357 [source_analyzed]     global_fastmatch_transform_calibration_reprojection_rmse_milli_px = m_match.gettransformsearchcalibrationreprojectionrmse() * 1000; | object=m_match | method=gettransformsearchcalibrationreprojectionrmse | params= | reason=not_executed
+358 [source_analyzed]     global_fastmatch_transform_best_physical_cx_milliunit = m_match.gettransformsearchphysicalcx() * 1000; | object=m_match | method=gettransformsearchphysicalcx | params= | reason=not_executed
+359 [source_analyzed]     global_fastmatch_transform_best_physical_cy_milliunit = m_match.gettransformsearchphysicalcy() * 1000; | object=m_match | method=gettransformsearchphysicalcy | params= | reason=not_executed
+360 [source_analyzed] } | object= | method= | params= | reason=not_executed
+361 [source_analyzed]  | object= | method= | params= | reason=not_executed
+362 [source_analyzed] global_fastmatch_formfit_status_code = m_match.getformfitstatuscode(); | object=m_match | method=getformfitstatuscode | params= | reason=not_executed
+363 [source_analyzed] global_fastmatch_formfit_reference_count = m_match.getformfitreferencecount(); | object=m_match | method=getformfitreferencecount | params= | reason=not_executed
+364 [source_analyzed] global_fastmatch_formfit_observed_count = m_match.getformfitobservedcount(); | object=m_match | method=getformfitobservedcount | params= | reason=not_executed
+365 [source_analyzed] global_fastmatch_formfit_mutual_count = m_match.getformfitmutualcount(); | object=m_match | method=getformfitmutualcount | params= | reason=not_executed
+366 [source_analyzed] global_fastmatch_formfit_anchor_count = m_match.getformfitanchorcount(); | object=m_match | method=getformfitanchorcount | params= | reason=not_executed
+367 [source_analyzed] global_fastmatch_formfit_score_permille = m_match.getformfitscore() * 1000; | object=m_match | method=getformfitscore | params= | reason=not_executed
+368 [source_analyzed] global_fastmatch_formfit_residual_milli_px = m_match.getformfitresidual() * 1000; | object=m_match | method=getformfitresidual | params= | reason=not_executed

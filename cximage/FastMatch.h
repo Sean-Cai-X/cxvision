@@ -141,6 +141,9 @@ public:
         int ann_min_component_points = 4;
         int ann_min_component_coverage_percent = 55;
         int trace_min_length_px = 20;
+        // Distance from the retained conclusion point to each polarity point.
+        // Learn synchronizes this from FastMatch compare_gap, so the complete
+        // A-to-B distance is always 2 * compare_gap in every learn path.
         int normal_pair_offset_px = 6;
         // Legacy CxScript compatibility only. Final polarity always inherits
         // the corresponding directional FindLine conclusion domain.

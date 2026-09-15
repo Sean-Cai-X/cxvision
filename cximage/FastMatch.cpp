@@ -1493,11 +1493,15 @@ bool LearnPatternByNormalTrace(Image &image, FastMatch &source, int learn_x,
     }
     if (domainAlignment < 0.0f)
       normal *= -1.0f;
-    const int offset = std::max(1, cfg.normal_pair_offset_px);
-    const cv::Point2f a(sourcePoint.x + normal.x * offset,
-                        sourcePoint.y + normal.y * offset);
-    const cv::Point2f b(sourcePoint.x - normal.x * offset,
-                        sourcePoint.y - normal.y * offset);
+    // compare_gap is the distance from the source conclusion to each polarity
+    // point. Dijkstra only de-duplicates/routes conclusions; it does not
+    // redefine the original directional polarity or pair spacing.
+    const float pairOffset = std::max(
+        1.0f, static_cast<float>(cfg.normal_pair_offset_px));
+    const cv::Point2f a(sourcePoint.x + normal.x * pairOffset,
+                        sourcePoint.y + normal.y * pairOffset);
+    const cv::Point2f b(sourcePoint.x - normal.x * pairOffset,
+                        sourcePoint.y - normal.y * pairOffset);
     if (a.x < 0 || a.y < 0 || b.x < 0 || b.y < 0 ||
         a.x >= source_mat.cols || b.x >= source_mat.cols ||
         a.y >= source_mat.rows || b.y >= source_mat.rows) continue;
@@ -3171,6 +3175,11 @@ void FastMatch::Learn(Image &image) {
   // the directional compatibility template below; otherwise that branch can
   // return early and leave Normal-Trace evidence permanently at NOT_RUN.
   if (m_normal_trace_config.enabled) {
+    // FastMatch compare_gap is authoritative for every Learn path. Historical
+    // Evidence scripts may still pass a legacy Normal-Trace offset; do not let
+    // that second value override the operator's current directional setting.
+    m_normal_trace_config.normal_pair_offset_px =
+        std::clamp(getconparegap(), 1, 128);
     CXLOG_INFO(
         "FastMatch", "learn_normal_trace_config", "effective",
         "overlap=" +
@@ -3180,6 +3189,7 @@ void FastMatch::Learn(Image &image) {
             std::to_string(m_normal_trace_config.dijkstra_max_nodes) +
             " pair_offset=" +
             std::to_string(m_normal_trace_config.normal_pair_offset_px) +
+            " pair_offset_source=fastmatch_compare_gap" +
             " knn=" +
             std::to_string(m_normal_trace_config.dijkstra_knn_neighbors) +
             " ann_radius=" +
@@ -3339,7 +3349,10 @@ void FastMatch::Learn(Image &image) {
       else local_nx = 1.0;                      // Right
       const double nx = local_nx * cos_angle - local_ny * sin_angle;
       const double ny = local_nx * sin_angle + local_ny * cos_angle;
-      const int half_gap = std::max(1, evidence.params.compare_gap / 2);
+      // compare_gap is the distance from this conclusion point to each member
+      // of the A/B polarity pair; the complete A-to-B distance is twice it.
+      const double pair_offset =
+          std::max(1.0, static_cast<double>(evidence.params.compare_gap));
       const int stride = std::max(
           1, static_cast<int>(modelPoints.size()) / 96);
       for (std::size_t point_index = 0;
@@ -3353,10 +3366,10 @@ void FastMatch::Learn(Image &image) {
         // template at the corners.
         if (!used_points.insert({px, py}).second)
           continue;
-        const double ax = static_cast<double>(px) + nx * half_gap;
-        const double ay = static_cast<double>(py) + ny * half_gap;
-        const double bx = static_cast<double>(px) - nx * half_gap;
-        const double by = static_cast<double>(py) - ny * half_gap;
+        const double ax = static_cast<double>(px) + nx * pair_offset;
+        const double ay = static_cast<double>(py) + ny * pair_offset;
+        const double bx = static_cast<double>(px) - nx * pair_offset;
+        const double by = static_cast<double>(py) - ny * pair_offset;
         if (!FastMatchPointInsideImage(image, static_cast<int>(std::lround(ax)),
                                        static_cast<int>(std::lround(ay))) ||
             !FastMatchPointInsideImage(image, static_cast<int>(std::lround(bx)),
@@ -3384,7 +3397,15 @@ void FastMatch::Learn(Image &image) {
       m_imodelheigh = static_cast<int>(learned_rect.Height());
       CXLOG_INFO("FastMatch", "learn_directional_selected_column", "complete",
                  "pairs=" + std::to_string(pair_count) +
-                     " source=directional_findline_probe");
+                     " source=directional_findline_probe" +
+                     " compare_gap_top=" +
+                     std::to_string(getdirectionalprobeevidence(0).params.compare_gap) +
+                     " compare_gap_bottom=" +
+                     std::to_string(getdirectionalprobeevidence(1).params.compare_gap) +
+                     " compare_gap_left=" +
+                     std::to_string(getdirectionalprobeevidence(2).params.compare_gap) +
+                     " compare_gap_right=" +
+                     std::to_string(getdirectionalprobeevidence(3).params.compare_gap));
       return;
     }
     CXLOG_WARN("FastMatch", "learn_directional_selected_column", "fallback",
@@ -4416,7 +4437,8 @@ void FastMatch::setnormaltraceparams(int overlap_radius_px, int min_gradient,
   m_normal_trace_config.domain_overlap_radius_px = std::clamp(overlap_radius_px, 0, 64);
   m_normal_trace_config.min_gradient = std::clamp(min_gradient, 1, 255);
   m_normal_trace_config.dijkstra_max_nodes = std::clamp(max_nodes, 32, 200000);
-  m_normal_trace_config.normal_pair_offset_px = std::clamp(pair_offset_px, 1, 128);
+  m_normal_trace_config.normal_pair_offset_px =
+      std::clamp(pair_offset_px, 1, 128);
 }
 void FastMatch::setnormaltracecosts(int gradient_weight_permille,
                                     int turn_weight_permille,

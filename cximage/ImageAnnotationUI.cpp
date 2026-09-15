@@ -1868,6 +1868,14 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
     }
 
     if (frame.left_released) {
+      // A fast pointer drag can be observed as click -> release without an
+      // intermediate frame where left_down is true.  Always capture the
+      // release position before committing so GUI automation and quick human
+      // gestures do not collapse a valid draft to a zero-sized shape.
+      double clamped_x = frame.image_x;
+      double clamped_y = frame.image_y;
+      ClampImagePointToImageBounds(clamped_x, clamped_y);
+      m_annotationDragEnd = {(float)clamped_x, (float)clamped_y};
       const AnnotationToolDefinition *activeTool =
           m_annotationLayer.ActiveTool();
       if (activeTool) {

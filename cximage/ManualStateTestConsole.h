@@ -499,6 +499,7 @@ struct RuntimeObjectView {
   std::array<int, 4> fastmatch_directional_probe_edge_count{};
   std::array<int, 4> fastmatch_directional_probe_selected_edge{};
   std::array<int, 4> fastmatch_directional_probe_runtime_selected_edge{};
+  std::array<int, 4> fastmatch_directional_probe_compare_gap{};
   std::array<std::string, 4> fastmatch_directional_probe_status{};
   int fastmatch_pattern_a_count = 0;
   int fastmatch_pattern_b_count = 0;
@@ -1163,6 +1164,11 @@ struct CxModelLineageUiNode {
   std::string training_plan_path;
   std::string metric_bundle_path;
   std::string promotion_status;
+
+  std::string admission_status;
+  std::string parent_usage;
+  bool development_parent_eligible = false;
+  bool production_registry_write_allowed = true;
   std::string model_node_path;
   bool parent_selection_reviewed = false;
   bool parent_gate_satisfied = false;
@@ -1623,10 +1629,24 @@ struct ManualTestContext {
 
   std::vector<TorchTrainingImageItem> torch_training_images;
   int selected_torch_training_image = -1;
+  int torch_training_annotation_class_id = 0;
   std::string torch_training_new_image_path;
   std::string torch_training_image_status = "PENDING";
   std::string torch_training_image_reason =
       "training image set not initialized";
+
+  std::string torch_training_last_exported_dataset_manifest;
+  std::string torch_training_last_exported_case_id;
+  std::string torch_training_inference_model_manifest;
+  std::string torch_training_inference_device = "cuda";
+  std::string torch_training_inference_status = "PENDING_SELECTED_IMAGE_INFERENCE";
+  std::string torch_training_inference_reason =
+      "select an image and provide a model manifest";
+  std::string torch_training_inference_result_ref;
+  std::string torch_training_inference_overlay_ref;
+  std::string torch_training_inference_candidates_ref;
+  double torch_training_inference_runtime_ms = 0.0;
+  int torch_training_inference_detection_count = 0;
   CxTorchTrainingRunBinding torch_training_run;
   std::string model_lineage_scan_root = "cxscript_runs";
   bool model_lineage_scan_attempted = false;

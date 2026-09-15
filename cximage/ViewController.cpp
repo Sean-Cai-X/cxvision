@@ -439,6 +439,7 @@ bool stageEvidenceSelfTestScriptGlobals(
     runtimeIntVars["global_findcircle_findsetting"] = 0;
 
   int applied = 0;
+
   applied += setRequiredIntIfUsed("global_roi_x0", roiX0) ? 1 : 0;
   applied += setRequiredIntIfUsed("global_roi_y0", roiY0) ? 1 : 0;
   applied += setRequiredIntIfUsed("global_roi_x1", roiX1) ? 1 : 0;
@@ -2481,6 +2482,12 @@ bool ViewController::ApplyEvidenceParameterSummaryToRuntimeGlobals(
   };
 
   int applied = 0;
+
+  // A scan rotation belongs to the incoming FastMatch parameter snapshot.
+  // Never let a summary which predates this field inherit an angle from an
+  // earlier working case.  A snapshot can still explicitly override this
+  // zero-degree default below.
+  context.runtime_int_vars["global_fastmatch_scan_rotation_deg"] = 0;
 
   applied += applyIntToken("method", "global_method") ? 1 : 0;
   applied += applyIntToken("threshold", "global_threshold") ? 1 : 0;
@@ -4876,11 +4883,15 @@ void ViewController::drawScriptAcceptancePanels() {
     }
   } else if (m_evidenceChainUiSection == 1) {
     ImGui::TextUnformatted("Case / 用例");
-    // Case and Evidence are two views of the same file-driven source.
-    // Populate both before rendering the Case table so CxEvidenceChain cases
-    // are not visible only on the Evidence tab.
+    // Case and Evidence are two views of the same file-driven source. Use the
+    // interactive asset tree here as well: expanding a directory is inert,
+    // while selecting one concrete case atomically applies its script,
+    // parameter snapshot and read-only image.
     EnsureCxScriptWorkbenchAssetsLoaded();
-    DrawEvidenceCaseListPanel(m_manualTest);
+    ImGui::TextDisabled(
+        "Expand a folder to inspect cases. Click a case row to load its "
+        "project, saved parameters and read-only image.");
+    DrawScriptEvidenceThumbnailRailByGroup();
   } else if (m_evidenceChainUiSection == 2) {
     ImGui::TextUnformatted("Evidence / 脚本 + 参数 + 图片");
 
@@ -5361,6 +5372,63 @@ void ViewController::drawScriptAcceptancePanels() {
       return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
     };
 
+    // The editable Learn ROI is an axis-aligned interaction shape, whereas
+    // FastMatch applies its saved scan rotation when it constructs the four
+    // directional FindLine probes.  Render that exact future orientation
+    // before Learn as a read-only preview, so a click on Learn cannot appear
+    // to introduce a hidden second rotation.
+    if (fastMatchContext &&
+        (m_manualTest.show_fastmatch_learn_scan_ticks ||
+         m_manualTest.show_fastmatch_debug_vectors)) {
+      const int previewRotationDeg = std::clamp(
+          runtimeInt("global_fastmatch_scan_rotation_deg", 0), -180, 180);
+      if (previewRotationDeg != 0) {
+        const int learnX = runtimeInt("global_learn_roi_x", 0);
+        const int learnY = runtimeInt("global_learn_roi_y", 0);
+        const int learnW = std::max(1, runtimeInt("global_learn_roi_w", 1));
+        const int learnH = std::max(1, runtimeInt("global_learn_roi_h", 1));
+        const double centerX = static_cast<double>(learnX) + learnW * 0.5;
+        const double centerY = static_cast<double>(learnY) + learnH * 0.5;
+        const double radians =
+            static_cast<double>(previewRotationDeg) * CV_PI / 180.0;
+        const double cosine = std::cos(radians);
+        const double sine = std::sin(radians);
+        const auto rotatePreviewPoint = [&](double x, double y) {
+          const double dx = x - centerX;
+          const double dy = y - centerY;
+          return CxShapePoint{centerX + cosine * dx - sine * dy,
+                              centerY + sine * dx + cosine * dy};
+        };
+        const CxShapePoint corners[4] = {
+            rotatePreviewPoint(learnX, learnY),
+            rotatePreviewPoint(learnX + learnW, learnY),
+            rotatePreviewPoint(learnX + learnW, learnY + learnH),
+            rotatePreviewPoint(learnX, learnY + learnH)};
+        const auto imageToScreenPreview = [&](const CxShapePoint &point) {
+          return ImVec2(imagePos.x + static_cast<float>(point.x) * sx,
+                        imagePos.y + static_cast<float>(point.y) * sy);
+        };
+        const ImU32 previewColor = IM_COL32(190, 116, 255, 210);
+        for (int corner = 0; corner < 4; ++corner) {
+          drawList->AddLine(imageToScreenPreview(corners[corner]),
+                            imageToScreenPreview(corners[(corner + 1) % 4]),
+                            previewColor, 1.6f);
+        }
+        const CxShapePoint directionTip = rotatePreviewPoint(
+            centerX + std::max(16.0, static_cast<double>(learnW) * 0.16),
+            centerY);
+        drawList->AddLine(imageToScreenPreview(CxShapePoint{centerX, centerY}),
+                          imageToScreenPreview(directionTip), previewColor,
+                          2.0f);
+        const ImVec2 previewLabel = imageToScreenPreview(corners[0]);
+        const std::string previewText =
+            "FM orientation preview " + std::to_string(previewRotationDeg) +
+            " deg (saved parameter)";
+        drawList->AddText(ImVec2(previewLabel.x + 6.0f, previewLabel.y - 18.0f),
+                          previewColor, previewText.c_str());
+      }
+    }
+
     if (fastMatchContext && m_manualTest.show_fastmatch_debug_vectors &&
         m_manualTest.show_fastmatch_learn_result) {
       auto ImageToScreenD = [&](double x, double y) -> ImVec2 {
@@ -5405,10 +5473,12 @@ void ViewController::drawScriptAcceptancePanels() {
             const ImVec2 sm = ImageToScreenD(mid.X() + learnOriginX,
                                               mid.Y() + learnOriginY);
 
-            if (selectedColumnLearn) {
+            if (selectedColumnLearn &&
+                !m_manualTest.show_fastmatch_compare_gap_pairs) {
               // Edge N / Last denotes the physical boundary crossing.  A/B
-              // are internal contrast samples for FastMatch, not additional
-              // detected edges, so project only their midpoint in this mode.
+              // are internal contrast samples for FastMatch. Keep the compact
+              // midpoint view unless the operator explicitly asks to inspect
+              // compare-gap pairs.
               drawList->AddCircleFilled(sm, 3.2f, midpointColor, 12);
               drawList->AddCircle(sm, 4.8f, pointBColor, 12, 1.0f);
             } else {
@@ -5449,10 +5519,21 @@ void ViewController::drawScriptAcceptancePanels() {
           }
           const gp_Pnt firstMid =
               midpoint(pathA.ElementAt(0), pathB.ElementAt(0));
-          const std::string label = std::string(selectedColumnLearn
-                                      ? "FM selected Point Column samples="
-                                      : "FM compare_gap pairs=") +
-                                    std::to_string(pairCount) + " A=" +
+          const gp_Pnt firstA = pathA.ElementAt(0);
+          const gp_Pnt firstB = pathB.ElementAt(0);
+          const double actualGap = std::hypot(firstA.X() - firstB.X(),
+                                               firstA.Y() - firstB.Y());
+          const bool showingSelectedColumnPairs =
+              selectedColumnLearn &&
+              m_manualTest.show_fastmatch_compare_gap_pairs;
+          const std::string label = std::string(
+                                    showingSelectedColumnPairs
+                                        ? "FM selected Point Column compare_gap pairs="
+                                        : selectedColumnLearn
+                                            ? "FM selected Point Column samples="
+                                            : "FM compare_gap pairs=") +
+                                    std::to_string(pairCount) + " actual_gap=" +
+                                    std::to_string(actualGap) + "px A=" +
                                     std::to_string(countA) + " B=" +
                                     std::to_string(countB) + " stride=" +
                                     std::to_string(stride);
@@ -6873,6 +6954,11 @@ void ViewController::initWindow(int theWidth, int theHeight,
 #endif
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   }
+
+  // The operator console owns dense evidence, annotation, and training
+  // surfaces. Start it maximized so those canonical panels have stable
+  // screen coordinates from the first rendered frame.
+  glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
   myOcctWindow = new Window(theWidth, theHeight, theTitle);
   GLFWwindow *glfwWindow =

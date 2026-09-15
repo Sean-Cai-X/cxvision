@@ -4372,13 +4372,25 @@ bool RunCxScriptHeadless(const CxScriptHeadlessOptions& options, CxScriptHeadles
         setGlobal("global_filterprofile", options.filterprofile);
         setGlobal("global_find_num", options.find_num);
         setGlobal("global_compare_gap", options.compare_gap);
-        setGlobal("global_fastmatch_learn_shared", 1);
+        // FastMatch has one physical parameter bucket per side.  Keep scalar
+        // detection settings shared, but seed exterior-edge polarity and
+        // sampling windows in opposite pairs instead of flattening all four
+        // native FindLine probes to one method.
+        setGlobal("global_fastmatch_learn_shared", 0);
+        const int fastMatchBaseMethod =
+            std::max(0, std::min(3, options.method));
         for (int dir = 0; dir < 4; ++dir)
         {
             const std::string suffix = "_" + std::to_string(dir);
-            setGlobal("global_fastmatch_learn_wgap" + suffix, options.wgap);
-            setGlobal("global_fastmatch_learn_hgap" + suffix, options.hgap);
-            setGlobal("global_fastmatch_learn_method" + suffix, options.method);
+            const bool horizontalEdge = dir < 2;
+            const bool oppositeSide = dir == 1 || dir == 3;
+            setGlobal("global_fastmatch_learn_wgap" + suffix,
+                      horizontalEdge ? options.wgap : options.hgap);
+            setGlobal("global_fastmatch_learn_hgap" + suffix,
+                      horizontalEdge ? options.hgap : options.wgap);
+            setGlobal("global_fastmatch_learn_method" + suffix,
+                      oppositeSide ? (fastMatchBaseMethod ^ 1)
+                                   : fastMatchBaseMethod);
             setGlobal("global_fastmatch_learn_threshold" + suffix, options.threshold);
             setGlobal("global_fastmatch_learn_linegap" + suffix, options.linegap);
             setGlobal("global_fastmatch_learn_objfilter" + suffix, 1);

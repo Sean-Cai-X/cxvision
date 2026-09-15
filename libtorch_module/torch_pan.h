@@ -65,8 +65,6 @@ public:
 
         auto p3_down = down_p3->forward(p3_out);
 
-        std::cout << "DEBUG PAN: p3_down shape: " << p3_down.sizes() << std::endl;
-        std::cout << "DEBUG PAN: p4_td shape: " << p4_td.sizes() << std::endl;
 
         if (p3_down.size(2) != p4_td.size(2) || p3_down.size(3) != p4_td.size(3)) {
             std::cerr << "ERROR: Cat dimension mismatch H/W!" << std::endl;

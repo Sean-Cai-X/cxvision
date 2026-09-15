@@ -30,6 +30,7 @@
 #include <array>
 #include <cctype>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -4487,6 +4488,140 @@ static bool IsAssetCasePathWithinRootLocal(const std::filesystem::path &root,
   return first == relative.end() || *first != "..";
 }
 
+static int AppendTypedLabelDraftAnnotationsLocal(
+    const std::filesystem::path &typedLabelPath,
+    const std::string &internalCaseId, const std::string &label,
+    int classId, std::vector<CxEvidenceAnnotationBinding> &annotations) {
+  cv::Mat typedLabel = cv::imread(typedLabelPath.string(), cv::IMREAD_GRAYSCALE);
+  if (typedLabel.empty())
+    return 0;
+
+  cv::Mat binary;
+  cv::threshold(typedLabel, binary, 0, 255, cv::THRESH_BINARY);
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(binary, contours, cv::RETR_EXTERNAL,
+                   cv::CHAIN_APPROX_SIMPLE);
+  std::sort(contours.begin(), contours.end(),
+            [](const std::vector<cv::Point> &left,
+               const std::vector<cv::Point> &right) {
+              return std::abs(cv::contourArea(left)) >
+                     std::abs(cv::contourArea(right));
+            });
+
+  int appended = 0;
+  for (const std::vector<cv::Point> &contour : contours) {
+    if (std::abs(cv::contourArea(contour)) < 4.0)
+      continue;
+    std::vector<cv::Point> polygon;
+    cv::approxPolyDP(contour, polygon,
+                     std::max(1.0, cv::arcLength(contour, true) * 0.005), true);
+    if (polygon.size() < 3)
+      continue;
+
+    CxEvidenceAnnotationBinding binding;
+    binding.image_id = internalCaseId;
+    binding.shape_kind = "PolylineShape";
+    binding.semantic_role = "mask_polygon";
+    binding.owner_binding = "typed_label";
+    binding.label = label;
+    binding.class_id = classId;
+    binding.normalized = false;
+    binding.closed = true;
+    for (const cv::Point &point : polygon) {
+      binding.points_xy.push_back(static_cast<float>(point.x));
+      binding.points_xy.push_back(static_cast<float>(point.y));
+    }
+    annotations.push_back(std::move(binding));
+    ++appended;
+  }
+  return appended;
+}
+
+// Asset cases are immutable test inputs.  Operator edits are stored beneath
+// each case in working_state/<logical-case-id>/current and re-applied when the
+// same asset case is selected again.  The loader deliberately identifies this
+// only from the case package and binding facts, never from a case name.
+static bool RestoreAssetCaseWorkingStateLocal(
+    const std::filesystem::path &caseDirectory,
+    const std::string &internalCaseId, ScriptEvidenceThumb &thumb,
+    std::string &reason) {
+  reason.clear();
+  if (caseDirectory.empty() || internalCaseId.empty())
+    return false;
+
+  const std::filesystem::path workingRoot = caseDirectory / "working_state";
+  std::error_code ec;
+  if (!std::filesystem::is_directory(workingRoot, ec) ||
+      std::filesystem::is_symlink(workingRoot, ec)) {
+    return false;
+  }
+
+  std::filesystem::recursive_directory_iterator it(
+      workingRoot, std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  const std::filesystem::recursive_directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    if (!it->is_regular_file(ec) ||
+        it->path().filename() != "evidence_binding.json") {
+      continue;
+    }
+    const std::filesystem::path bindingPath = it->path();
+    if (!IsAssetCasePathWithinRootLocal(caseDirectory, bindingPath) ||
+        std::filesystem::is_symlink(bindingPath, ec)) {
+      continue;
+    }
+    std::string binding;
+    if (!ReadTextFile(bindingPath.string(), binding) ||
+        ReadJsonStringFieldLocal(binding, "case_id") != internalCaseId) {
+      continue;
+    }
+
+    const std::filesystem::path candidateDir = bindingPath.parent_path();
+    const std::string candidateId =
+        ReadJsonStringFieldLocal(binding, "candidate_id");
+    const std::string scriptSnapshot =
+        ReadJsonStringFieldLocal(binding, "script_snapshot_path");
+    const std::string runtimeGlobals =
+        ReadJsonStringFieldLocal(binding, "runtime_globals_path");
+    const std::string gaugeAnnotation =
+        ReadJsonStringFieldLocal(binding, "gauge_annotation_path");
+    const std::filesystem::path scriptPath(scriptSnapshot);
+    const std::filesystem::path globalsPath(runtimeGlobals);
+    const std::filesystem::path gaugePath(gaugeAnnotation);
+    if (candidateId.empty() || scriptSnapshot.empty() || runtimeGlobals.empty() ||
+        gaugeAnnotation.empty() ||
+        !std::filesystem::is_regular_file(scriptPath, ec) ||
+        !std::filesystem::is_regular_file(globalsPath, ec) ||
+        !std::filesystem::is_regular_file(gaugePath, ec)) {
+      continue;
+    }
+
+    thumb.candidate_id = candidateId;
+    thumb.candidate_dir = candidateDir.string();
+    thumb.evidence_binding_path = bindingPath.string();
+    thumb.parameter_snapshot_path =
+        ReadJsonStringFieldLocal(binding, "parameter_snapshot_path");
+    thumb.runtime_globals_path = runtimeGlobals;
+    thumb.gauge_annotation_path = gaugeAnnotation;
+    thumb.working_script_snapshot_path = scriptSnapshot;
+    thumb.source_evidence_script_path =
+        ReadJsonStringFieldLocal(binding, "source_evidence_script_path");
+    if (thumb.source_evidence_script_path.empty())
+      thumb.source_evidence_script_path = thumb.script_path;
+    const std::string savedSummary =
+        ReadJsonStringFieldLocal(binding, "parameter_summary");
+    if (!savedSummary.empty())
+      thumb.parameter_summary = savedSummary;
+    thumb.has_saved_state = true;
+    thumb.is_candidate = false;
+    thumb.status = "pending_human_review";
+    thumb.reason += "; restored asset working_state=" + candidateDir.string();
+    reason = "restored asset working state: " + candidateDir.string();
+    return true;
+  }
+  return false;
+}
+
 static int AppendAssetDrivenEvidenceCasesLocal(
     ManualTestContext &context,
     const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
@@ -4641,6 +4776,12 @@ static int AppendAssetDrivenEvidenceCasesLocal(
           FileNodeStringLocal(manifest.root(), "evidence_overlay");
       const std::string summaryRef =
           FileNodeStringLocal(manifest.root(), "result_summary");
+      const std::string scriptRef =
+          FileNodeStringLocal(manifest.root(), "script_snapshot");
+      std::string caseTool = NormalizeEvidenceToolTypeLocal(
+          FileNodeStringLocal(manifest.root(), "tool"));
+      if (caseTool.empty())
+        caseTool = "GeometryReference";
       const cv::FileNode requiredAssets = manifest["required_assets"];
       if (runId.empty() || internalCaseId.empty() || reviewItem.empty() ||
           sourceRef.empty() || labelRef.empty() || factsRef.empty() ||
@@ -4678,6 +4819,13 @@ static int AppendAssetDrivenEvidenceCasesLocal(
           }
         }
       }
+      if (assetsValid && !scriptRef.empty() &&
+          requiredNames.count(scriptRef) == 0) {
+        reject(manifestPath,
+               "script_snapshot is absent from required_assets: " +
+                   scriptRef);
+        assetsValid = false;
+      }
       if (!assetsValid) {
         iterator.increment(iteratorError);
         continue;
@@ -4704,31 +4852,50 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       thumb.case_id = internalCaseId;
       thumb.review_item = reviewItem;
       thumb.script_id = reviewItem;
+      if (!scriptRef.empty()) {
+        thumb.script_path = (caseDirectory / scriptRef).string();
+        thumb.source_evidence_script_path = thumb.script_path;
+        thumb.working_script_snapshot_path = thumb.script_path;
+      }
       thumb.image_id = internalCaseId;
       thumb.image_path = sourcePath.string();
       thumb.thumbnail_path = overlayPath.string();
-      thumb.target_id = FileNodeStringLocal(manifest.root(), "geometry_type");
-      thumb.tool = "GeometryReference";
+      thumb.target_id = FileNodeStringLocal(manifest.root(), "target_id");
+      if (thumb.target_id.empty())
+        thumb.target_id = FileNodeStringLocal(manifest.root(), "geometry_type");
+      thumb.tool = caseTool;
       thumb.parameter_summary =
-          "track=" + FileNodeStringLocal(manifest.root(), "case_track") +
-          " geometry=" + thumb.target_id +
-          " topology=" + FileNodeStringLocal(manifest.root(), "topology") +
-          " split=" + FileNodeStringLocal(manifest.root(), "split") +
-          " variant=" + FileNodeStringLocal(manifest.root(), "variant_id") +
-          " degradation=" +
-          FileNodeStringLocal(manifest.root(), "degradation_bucket") +
-          " training_enabled=0";
+          FileNodeStringLocal(manifest.root(), "parameter_summary");
+      if (thumb.parameter_summary.empty()) {
+        thumb.parameter_summary =
+            "track=" + FileNodeStringLocal(manifest.root(), "case_track") +
+            " geometry=" + thumb.target_id +
+            " topology=" + FileNodeStringLocal(manifest.root(), "topology") +
+            " split=" + FileNodeStringLocal(manifest.root(), "split") +
+            " variant=" + FileNodeStringLocal(manifest.root(), "variant_id") +
+            " degradation=" +
+            FileNodeStringLocal(manifest.root(), "degradation_bucket") +
+            " training_enabled=0";
+      }
       thumb.evidence_output_root = caseDirectory.string();
       thumb.contract_id = FileNodeStringLocal(manifest.root(), "schema");
       thumb.expected_result = summaryRef;
       thumb.expected_policy_guard =
           "controlled fixture review only; production quality is not claimed";
-      thumb.evidence_level = "T0";
-      thumb.evidence_case_role = "asset_driven_geometry_reference";
+      thumb.evidence_level = FileNodeStringLocal(manifest.root(), "evidence_level");
+      if (thumb.evidence_level.empty())
+        thumb.evidence_level = "T0";
+      thumb.evidence_case_role =
+          FileNodeStringLocal(manifest.root(), "case_role");
+      if (thumb.evidence_case_role.empty())
+        thumb.evidence_case_role = "asset_driven_reference";
       thumb.source_case_id = internalCaseId;
       thumb.manual_review_required = true;
       thumb.promotion_candidate = false;
-      thumb.evidence_category_override = "To Verify";
+      thumb.evidence_category_override =
+          FileNodeStringLocal(manifest.root(), "display_category");
+      if (thumb.evidence_category_override.empty())
+        thumb.evidence_category_override = "To Verify";
       thumb.evidence_head_folder = runId;
       thumb.evidence_case_folder = reviewItem;
       thumb.workflow_id = runId;
@@ -4754,15 +4921,43 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       thumb.reason = "asset-driven Evidence case; manifest=" + manifestPath.string() +
                      "; typed_label=" + labelPath.string() +
                      "; summary=" + (caseDirectory / summaryRef).string();
+      std::string workingStateReason;
+      RestoreAssetCaseWorkingStateLocal(caseDirectory, internalCaseId, thumb,
+                                        workingStateReason);
       CxEvidenceDatasetImageBinding sourceBinding;
       sourceBinding.image_id = internalCaseId;
       sourceBinding.image_path = sourcePath.string();
       sourceBinding.split = evidenceSplit;
       sourceBinding.label = thumb.target_id;
-      sourceBinding.source = "evidence_case_manifest";
+      std::string sourceHash;
+      cv::FileStorage geometryFacts;
+      try {
+        geometryFacts.open((caseDirectory / factsRef).string(),
+                           cv::FileStorage::READ |
+                               cv::FileStorage::FORMAT_JSON);
+      } catch (const cv::Exception &) {
+      }
+      if (geometryFacts.isOpened())
+        sourceHash =
+            FileNodeStringLocal(geometryFacts.root(), "source_input_sha256");
+      sourceBinding.source = sourceHash.empty()
+                                 ? "evidence_case_manifest"
+                                 : "source_hash:" + sourceHash;
       thumb.dataset_images.push_back(sourceBinding);
 
-      findGroup("Geometry Reference / Asset Cases").thumbs.push_back(thumb);
+      int classId = 0;
+      const cv::FileNode classIdNode = manifest.root()["class_id"];
+      if (!classIdNode.empty())
+        classId = static_cast<int>(classIdNode);
+      AppendTypedLabelDraftAnnotationsLocal(labelPath, internalCaseId,
+                                            thumb.target_id, classId,
+                                            thumb.annotations);
+
+      std::string displayGroup =
+          FileNodeStringLocal(manifest.root(), "display_group");
+      if (displayGroup.empty())
+        displayGroup = caseTool + " / Asset Cases";
+      findGroup(displayGroup).thumbs.push_back(thumb);
 
       ManualEvidenceItem item;
       item.case_id = internalCaseId;
@@ -5032,11 +5227,70 @@ static int AppendFastMatchHeadlessEvidenceCasesLocal(
   return accepted;
 }
 
+static bool IsCuratedAssetOnlyEvidenceQueueLocal() {
+  const std::filesystem::path policyPath = ResolveCxVisionRunPath(
+      "cxscript_runs/_shared/evidence_case_queue.json");
+  cv::FileStorage policy;
+  try {
+    if (!policy.open(policyPath.string(),
+                     cv::FileStorage::READ | cv::FileStorage::FORMAT_JSON))
+      return false;
+  } catch (const cv::Exception &) {
+    return false;
+  }
+  return FileNodeStringLocal(policy.root(), "schema") ==
+             "cxvision.evidence_case_queue.v1" &&
+         FileNodeStringLocal(policy.root(), "mode") ==
+             "CURATED_ASSET_ONLY";
+}
+
 void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
   if (m_manualTest.script_evidence_groups_dirty == false)
     return;
 
   LoadEvidenceCategoryOverridesLocal(m_manualTest);
+
+  const bool curatedAssetOnly = IsCuratedAssetOnlyEvidenceQueueLocal();
+  if (curatedAssetOnly) {
+    for (auto &group : m_manualTest.script_evidence_groups) {
+      for (auto &thumb : group.thumbs)
+        ResetEvidenceThumbTexture(thumb);
+    }
+    m_manualTest.script_evidence_groups.clear();
+    m_manualTest.evidence_items.erase(
+        std::remove_if(m_manualTest.evidence_items.begin(),
+                       m_manualTest.evidence_items.end(),
+                       [](const ManualEvidenceItem &item) {
+                         return !item.source_evidence_chain_path.empty();
+                       }),
+        m_manualTest.evidence_items.end());
+    auto findCuratedGroup = [&](const std::string &label)
+        -> ScriptEvidenceGroup & {
+      for (auto &group : m_manualTest.script_evidence_groups) {
+        if (group.label == label)
+          return group;
+      }
+      ScriptEvidenceGroup group;
+      group.label = label;
+      m_manualTest.script_evidence_groups.push_back(std::move(group));
+      return m_manualTest.script_evidence_groups.back();
+    };
+    std::string curatedAssetReason;
+    AppendAssetDrivenEvidenceCasesLocal(m_manualTest, findCuratedGroup,
+                                        curatedAssetReason);
+    m_manualTest.debug_reason =
+        "Evidence queue mode=CURATED_ASSET_ONLY; " + curatedAssetReason;
+    ++m_manualTest.script_evidence_groups_revision;
+    if (m_manualTest.script_evidence_groups_debug_revision !=
+        m_manualTest.script_evidence_groups_revision) {
+      WriteEvidenceChainLoadedElementsDebugLocal(m_manualTest);
+      m_manualTest.script_evidence_groups_debug_revision =
+          m_manualTest.script_evidence_groups_revision;
+    }
+    m_manualTest.script_evidence_groups_dirty = false;
+    m_manualTest.script_evidence_row_refs_dirty = true;
+    return;
+  }
 
   EnsureStructuredCxImageCatalogEntriesLoaded(m_manualTest);
   m_manualTest.evidence_items.erase(
@@ -7080,6 +7334,7 @@ for (const auto &element : m_annotationLayer.ShapeElements()) {
   snap.owner_ref = element.owner_ref;
   snap.owner_binding = element.owner_binding;
   snap.semantic_role = element.semantic_role;
+  snap.class_id = m_manualTest.torch_training_annotation_class_id;
   const auto previous = std::find_if(
       item.annotation_shapes.begin(), item.annotation_shapes.end(),
       [&snap](const TorchTrainingAnnotationShapeSnapshot &candidate) {
@@ -7257,6 +7512,8 @@ static std::string NormalizeTorchTrainingSplitLocal(std::string split) {
     return "train";
   if (split == "validation" || split == "validate" || split == "valid")
     return "val";
+  if (split == "holdout")
+    return "test";
   return split;
 }
 
@@ -7551,8 +7808,6 @@ int ViewController::AddGeometryAugmentationDatasetForCurrentSelection() {
           FileNodeStringLocal(caseManifest.root(), "position_annotation_ref");
       std::string split = NormalizeTorchTrainingSplitLocal(
           FileNodeStringLocal(caseManifest.root(), "split"));
-      if (split == "val")
-        split = "test";
 
       const std::filesystem::path sourceImage =
           ResolveGeometryAugAssetRefLocal(caseDirectory, sourceImageRef);
@@ -7632,6 +7887,12 @@ int ViewController::AddGeometryAugmentationDatasetForCurrentSelection() {
         item.annotation_reason =
             "typed_label=" + typedLabel.string() +
             "; human review not recorded; training_enabled=0";
+        if (factsOpened) {
+          const std::string sourceHash =
+              FileNodeStringLocal(facts.root(), "source_input_sha256");
+          if (!sourceHash.empty())
+            item.source = "source_hash:" + sourceHash;
+        }
       }
 
       if (split == "train")
@@ -8710,12 +8971,40 @@ bool ViewController::ExportTorchTrainingLabelPackage(std::string &packagePath,
   int bboxOnlyRejectedCount = 0;
   int invalidPolygonCount = 0;
   int trainImageWithoutMaskCount = 0;
+  int trainImageCount = 0;
+  int validationImageCount = 0;
+  int holdoutImageCount = 0;
+  int unknownSplitCount = 0;
+  std::set<std::string> trainLineages;
+  std::set<std::string> validationLineages;
+  std::set<std::string> holdoutLineages;
   std::ostringstream imageRows;
 
   for (std::size_t imageIndex = 0;
        imageIndex < m_manualTest.torch_training_images.size(); ++imageIndex) {
     const TorchTrainingImageItem &item =
         m_manualTest.torch_training_images[imageIndex];
+    const std::string normalizedSplit =
+        NormalizeTorchTrainingSplitLocal(item.split);
+    std::string lineageKey;
+    if (item.source.rfind("source_hash:", 0) == 0)
+      lineageKey = item.source;
+    else
+      lineageKey = ResolveWorkspaceFile(item.image_path)
+                       .lexically_normal()
+                       .generic_string();
+    if (normalizedSplit == "train") {
+      ++trainImageCount;
+      trainLineages.insert(lineageKey);
+    } else if (normalizedSplit == "val") {
+      ++validationImageCount;
+      validationLineages.insert(lineageKey);
+    } else if (normalizedSplit == "test") {
+      ++holdoutImageCount;
+      holdoutLineages.insert(lineageKey);
+    } else {
+      ++unknownSplitCount;
+    }
     cv::Mat image = cv::imread(item.image_path, cv::IMREAD_COLOR);
     const bool imageExists = !image.empty();
     ++imageCount;
@@ -8873,13 +9162,33 @@ bool ViewController::ExportTorchTrainingLabelPackage(std::string &packagePath,
       imageRows << "\n      ";
     imageRows << "]\n    }";
   }
-  const bool datasetReady = imageCount > 0 && imageMissingCount == 0 &&
-                            rasterMaskCount > 0 && bboxOnlyRejectedCount == 0 &&
-                            invalidPolygonCount == 0 &&
-                            trainImageWithoutMaskCount == 0;
-  const std::string datasetStatus =
-      datasetReady ? "DATASET_EXPORT_READY_TO_VERIFY"
-                   : "DATASET_PREFLIGHT_FAIL_REAL_POLYGON_REQUIRED";
+  int sourceLineageOverlapCount = 0;
+  for (const std::string &lineage : validationLineages) {
+    if (trainLineages.count(lineage) != 0)
+      ++sourceLineageOverlapCount;
+  }
+  for (const std::string &lineage : holdoutLineages) {
+    if (trainLineages.count(lineage) != 0 ||
+        validationLineages.count(lineage) != 0)
+      ++sourceLineageOverlapCount;
+  }
+  const bool splitContractReady = trainImageCount > 0 &&
+                                  validationImageCount > 0 &&
+                                  holdoutImageCount > 0 &&
+                                  unknownSplitCount == 0;
+  const bool datasetReady = imageCount > 0 && splitContractReady &&
+                             sourceLineageOverlapCount == 0 &&
+                             imageMissingCount == 0 &&
+                             rasterMaskCount > 0 && bboxOnlyRejectedCount == 0 &&
+                             invalidPolygonCount == 0 &&
+                             trainImageWithoutMaskCount == 0;
+  const std::string datasetStatus = datasetReady
+      ? "DATASET_EXPORT_READY_TO_VERIFY"
+      : (!splitContractReady
+             ? "DATASET_PREFLIGHT_FAIL_SPLIT_REQUIRED"
+             : (sourceLineageOverlapCount > 0
+                    ? "DATASET_PREFLIGHT_FAIL_SOURCE_LINEAGE_OVERLAP"
+                    : "DATASET_PREFLIGHT_FAIL_REAL_POLYGON_REQUIRED"));
   std::ostringstream json;
   json << "{\n";
   json << "  \"schema\": \"cxvision.torch.training_dataset.v2\",\n";
@@ -8908,6 +9217,13 @@ bool ViewController::ExportTorchTrainingLabelPackage(std::string &packagePath,
   json << "    \"invalid_polygon_count\": " << invalidPolygonCount << ",\n";
   json << "    \"train_image_without_mask_count\": "
        << trainImageWithoutMaskCount << ",\n";
+  json << "    \"train_image_count\": " << trainImageCount << ",\n";
+  json << "    \"validation_image_count\": " << validationImageCount
+       << ",\n";
+  json << "    \"holdout_image_count\": " << holdoutImageCount << ",\n";
+  json << "    \"unknown_split_count\": " << unknownSplitCount << ",\n";
+  json << "    \"source_lineage_overlap_count\": "
+       << sourceLineageOverlapCount << ",\n";
   json << "    \"rejected_shape_count\": " << rejectedShapeCount << "\n";
   json << "  }\n}";
 
@@ -8919,7 +9235,18 @@ bool ViewController::ExportTorchTrainingLabelPackage(std::string &packagePath,
   }
 
   packagePath = path.string();
+
+  if (datasetReady) {
+    m_manualTest.torch_training_last_exported_dataset_manifest = packagePath;
+    m_manualTest.torch_training_last_exported_case_id =
+        m_manualTest.current_evidence_selection.case_id;
+  }
   reason = datasetStatus + ": images=" + std::to_string(imageCount) +
+           " train=" + std::to_string(trainImageCount) +
+           " val=" + std::to_string(validationImageCount) +
+           " holdout=" + std::to_string(holdoutImageCount) +
+           " source_overlap=" +
+               std::to_string(sourceLineageOverlapCount) +
            " masks=" + std::to_string(rasterMaskCount) +
            " bbox_only_rejected=" + std::to_string(bboxOnlyRejectedCount) +
            " invalid_polygons=" + std::to_string(invalidPolygonCount) +
@@ -10077,10 +10404,148 @@ static void DrawYoloTrainingFeedbackLocal(
   ImGui::PopID();
 }
 
+bool ViewController::RunYoloV8nSelectedImageInferenceFromGui(
+    std::string &reason) {
+  reason.clear();
+  if (m_manualTest.selected_torch_training_image < 0 ||
+      m_manualTest.selected_torch_training_image >=
+          static_cast<int>(m_manualTest.torch_training_images.size())) {
+    reason = "select one image from the Train, Validation, or Holdout rail";
+    m_manualTest.torch_training_inference_status = "INFERENCE_IMAGE_REQUIRED";
+    m_manualTest.torch_training_inference_reason = reason;
+    return false;
+  }
+
+  const TorchTrainingImageItem &selected =
+      m_manualTest.torch_training_images[static_cast<std::size_t>(
+          m_manualTest.selected_torch_training_image)];
+  const std::filesystem::path imagePath =
+      ResolveWorkspaceFile(selected.image_path);
+  const std::filesystem::path manifestPath = ResolveWorkspaceFile(
+      m_manualTest.torch_training_inference_model_manifest);
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(imagePath, ec) || ec) {
+    reason = "selected image is missing or unreadable: " + imagePath.string();
+    m_manualTest.torch_training_inference_status = "INFERENCE_IMAGE_MISSING";
+    m_manualTest.torch_training_inference_reason = reason;
+    return false;
+  }
+  ec.clear();
+  if (!std::filesystem::is_regular_file(manifestPath, ec) || ec) {
+    reason = "model manifest is missing or unreadable: " +
+             manifestPath.string();
+    m_manualTest.torch_training_inference_status = "MODEL_MANIFEST_REQUIRED";
+    m_manualTest.torch_training_inference_reason = reason;
+    return false;
+  }
+
+  std::string requestedDevice =
+      m_manualTest.torch_training_inference_device;
+  std::transform(requestedDevice.begin(), requestedDevice.end(),
+                 requestedDevice.begin(), [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  if (requestedDevice != "cpu" && requestedDevice != "cuda" &&
+      requestedDevice != "auto") {
+    reason = "inference device must be cpu, cuda, or auto";
+    m_manualTest.torch_training_inference_status =
+        "INFERENCE_DEVICE_INVALID";
+    m_manualTest.torch_training_inference_reason = reason;
+    return false;
+  }
+
+  const auto tick = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+  const std::string sessionId = CxUnifiedLog::Instance().RunId().empty()
+                                    ? "ui_session"
+                                    : CxUnifiedLog::Instance().RunId();
+  const std::filesystem::path outputDir =
+      ResolveCxVisionRunPath("cxscript_runs/manual_yolov8_detection") /
+      sessionId /
+      (imagePath.stem().string() + "_" + std::to_string(tick));
+
+  CxTorchTaskSpec task;
+  task.kind = CxTorchTaskKind::Detection;
+  task.task_id = "torch.infer.detection.yolov8.v1";
+  task.case_id = selected.case_id.empty() ? selected.image_id : selected.case_id;
+  task.manifest_path = manifestPath;
+  task.input_image_path = imagePath;
+  task.output_dir = outputDir;
+  task.requested_device = requestedDevice;
+  task.timeout_ms = 30000;
+
+  CxInferenceResult inference;
+  CxTorchExecutionAdapter adapter;
+  if (!adapter.Execute(task, inference, reason)) {
+    m_manualTest.torch_training_inference_status =
+        inference.failure_stage.empty() ? "YOLO_INFERENCE_FAILED"
+                                        : inference.failure_stage;
+    m_manualTest.torch_training_inference_reason =
+        inference.reason.empty() ? reason : inference.reason;
+    CXLOG_ERROR("TorchTrainingImageSet", "selected_image_yolo_inference",
+                "FAIL", m_manualTest.torch_training_inference_reason);
+    return false;
+  }
+
+  m_manualTest.torch_training_inference_status =
+      inference.status.empty() ? "YOLO_INFERENCE_COMPLETE" : inference.status;
+  m_manualTest.torch_training_inference_reason =
+      "selected source image was inferred; overlay is displayed in Image View";
+  m_manualTest.torch_training_inference_result_ref = inference.result_ref;
+  m_manualTest.torch_training_inference_overlay_ref =
+      inference.primary_visual_ref;
+  m_manualTest.torch_training_inference_candidates_ref =
+      inference.bbox_candidate_list_ref;
+  m_manualTest.torch_training_inference_runtime_ms = inference.infer_runtime_ms;
+  m_manualTest.torch_training_inference_detection_count =
+      static_cast<int>(inference.detections.size());
+
+  if (!inference.primary_visual_ref.empty()) {
+    std::string loadReason;
+    if (!LoadImageIntoImageView(inference.primary_visual_ref, loadReason)) {
+      reason = "inference succeeded but overlay could not be displayed: " +
+               loadReason;
+      m_manualTest.torch_training_inference_status =
+          "YOLO_INFERENCE_OVERLAY_LOAD_FAILED";
+      m_manualTest.torch_training_inference_reason = reason;
+      return false;
+    }
+  }
+
+  CXLOG_INFO(
+      "TorchTrainingImageSet", "selected_image_yolo_inference", "complete",
+      "image_path=" + imagePath.string() +
+          " manifest=" + manifestPath.string() +
+          " detections=" +
+          std::to_string(m_manualTest.torch_training_inference_detection_count) +
+          " runtime_ms=" +
+          std::to_string(m_manualTest.torch_training_inference_runtime_ms) +
+          " result=" + m_manualTest.torch_training_inference_result_ref +
+          " overlay=" + m_manualTest.torch_training_inference_overlay_ref);
+  return true;
+}
+
 bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   reason.clear();
   if (m_manualTest.torch_training_process_running) {
     reason = "C++ incremental training is already running";
+    return false;
+  }
+  bool trainingAssetMatched = false;
+  const bool trainingAssetEnabled = EvidenceSelectionTrainingEnabledLocal(
+      m_manualTest.current_evidence_selection, trainingAssetMatched);
+  if (trainingAssetMatched && !trainingAssetEnabled) {
+    reason = "TRAINING_BLOCKED_BY_ASSET_POLICY: selected Evidence case is "
+             "reference-only (training_enabled=0)";
+    m_manualTest.geometry_aug_run_status =
+        "TRAINING_BLOCKED_BY_ASSET_POLICY";
+    m_manualTest.geometry_aug_run_reason = reason;
+    m_manualTest.torch_training_image_status =
+        "TRAINING_BLOCKED_BY_ASSET_POLICY";
+    m_manualTest.torch_training_image_reason = reason;
+    CXLOG_WARN("TorchTrainingImageSet", "incremental_training_blocked",
+               "TRAINING_BLOCKED_BY_ASSET_POLICY", reason);
     return false;
   }
   const int selectedParentIndex = m_manualTest.selected_model_lineage_node;
@@ -10109,16 +10574,92 @@ bool ViewController::RunYoloV8nIncrementalTrainingFromGui(std::string &reason) {
   }
   const std::filesystem::path workflowRoot =
       ResolveCxVisionRunPath("cxscript_runs/yolov8n_incremental");
-  const std::filesystem::path packageManifest =
-      FindLatestRegularFileLocal(workflowRoot, "package_manifest.json");
+  // Training must consume an asset explicitly owned by the current Evidence
+  // selection.  Looking up the globally newest package can silently train a
+  // different case after another run has written into the shared run root.
+  std::vector<std::filesystem::path> packageCandidates;
+  auto addPackageCandidate = [&](const std::string &reference) {
+    if (reference.empty())
+      return;
+    const std::filesystem::path resolved = ResolveWorkspaceFile(reference);
+    std::error_code candidateError;
+    if (std::filesystem::is_regular_file(resolved, candidateError) &&
+        !candidateError) {
+      if (resolved.filename() == "package_manifest.json")
+        packageCandidates.push_back(resolved);
+      else
+        packageCandidates.push_back(resolved.parent_path() /
+                                    "package_manifest.json");
+      return;
+    }
+    candidateError.clear();
+    if (std::filesystem::is_directory(resolved, candidateError) &&
+        !candidateError)
+      packageCandidates.push_back(resolved / "package_manifest.json");
+  };
+  addPackageCandidate(
+      m_manualTest.current_evidence_selection.dataset_summary_ref);
+  addPackageCandidate(
+      m_manualTest.current_evidence_selection.evidence_output_root);
+  addPackageCandidate(m_manualTest.current_evidence_selection.candidate_dir);
+  addPackageCandidate(
+      m_manualTest.current_evidence_selection.source_evidence_script_path);
+  addPackageCandidate(m_manualTest.current_evidence_selection.image_path);
+
+  std::filesystem::path packageManifest;
+  std::set<std::string> checkedPackagePaths;
+  for (const std::filesystem::path &candidate : packageCandidates) {
+    const std::filesystem::path normalized = candidate.lexically_normal();
+    if (!checkedPackagePaths.insert(normalized.generic_string()).second)
+      continue;
+    std::error_code candidateError;
+    if (std::filesystem::is_regular_file(normalized, candidateError) &&
+        !candidateError) {
+      packageManifest = normalized;
+      break;
+    }
+  }
   const std::filesystem::path trainingPlanTemplate = ResolveWorkspaceFile(
       "cxparser/cxscript/module/cximage/tests/"
       "yolov8n_cpp_detection_full_coverage_plan.json");
   std::error_code ec;
   if (packageManifest.empty() ||
       !std::filesystem::is_regular_file(trainingPlanTemplate, ec) || ec) {
-    reason = "latest YOLO dataset package or C++ training plan is missing";
-    m_manualTest.geometry_aug_run_status = "ASSET_PREFLIGHT_FAIL";
+    reason = packageManifest.empty()
+                 ? "CURRENT_CASE_DATASET_PACKAGE_REQUIRED: the selected "
+                   "Evidence case does not explicitly reference or contain "
+                   "package_manifest.json"
+                 : "C++ training plan template is missing";
+    m_manualTest.geometry_aug_run_status =
+        packageManifest.empty() ? "CURRENT_CASE_DATASET_PACKAGE_REQUIRED"
+                                : "ASSET_PREFLIGHT_FAIL";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+  cv::FileStorage packageStorage(packageManifest.string(),
+                                 cv::FileStorage::READ);
+  const std::string packageSchema = packageStorage.isOpened()
+                                        ? static_cast<std::string>(
+                                              packageStorage["schema"])
+                                        : std::string{};
+  int packageTrainingEnabled = 0;
+  if (packageStorage.isOpened())
+    packageStorage["training_enabled"] >> packageTrainingEnabled;
+  if (!packageStorage.isOpened() ||
+      (packageSchema != "cxvision.yolov8n_aabb_package.v1" &&
+       packageSchema != "cxvision.yolov8n_aabb_mask_package.v1")) {
+    reason = "CURRENT_CASE_DATASET_PACKAGE_INVALID: unsupported or unreadable "
+             "package_manifest.json";
+    m_manualTest.geometry_aug_run_status =
+        "CURRENT_CASE_DATASET_PACKAGE_INVALID";
+    m_manualTest.geometry_aug_run_reason = reason;
+    return false;
+  }
+  if (packageTrainingEnabled == 0) {
+    reason = "TRAINING_BLOCKED_BY_PACKAGE_POLICY: current-case "
+             "package_manifest.json has training_enabled=0";
+    m_manualTest.geometry_aug_run_status =
+        "TRAINING_BLOCKED_BY_PACKAGE_POLICY";
     m_manualTest.geometry_aug_run_reason = reason;
     return false;
   }
@@ -10386,6 +10927,20 @@ static std::string
 ReadModelLineageStringLocal(const cv::FileNode &node, const char *key) {
   const cv::FileNode value = node[key];
   return value.empty() ? std::string() : static_cast<std::string>(value);
+}
+
+static bool ReadModelLineageBoolLocal(const cv::FileNode &node,
+                                      const char *key, bool fallback) {
+  const cv::FileNode value = node[key];
+  if (value.empty())
+    return fallback;
+  if (value.isInt())
+    return static_cast<int>(value) != 0;
+  if (value.isString()) {
+    const std::string text = static_cast<std::string>(value);
+    return text == "true" || text == "TRUE" || text == "1";
+  }
+  return fallback;
 }
 
 static std::vector<std::string>
@@ -10796,6 +11351,14 @@ static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
           ReadModelLineageStringLocal(root, "checkpoint_hash_status");
       node.promotion_status =
           ReadModelLineageStringLocal(root, "promotion_status");
+      node.admission_status =
+          ReadModelLineageStringLocal(root, "admission_status");
+      node.parent_usage =
+          ReadModelLineageStringLocal(root, "parent_usage");
+      node.development_parent_eligible = ReadModelLineageBoolLocal(
+          root, "development_parent_eligible", false);
+      node.production_registry_write_allowed = ReadModelLineageBoolLocal(
+          root, "production_registry_write_allowed", true);
 
       if (schema != "cxvision.model_lineage_node.v1")
         rejectReason = "unsupported schema";
@@ -10808,6 +11371,7 @@ static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
                node.promotion_status.empty())
         rejectReason = "required lineage fact is empty";
       else if (node.node_kind != "release" &&
+               node.node_kind != "development_parent" &&
                node.node_kind != "incremental_candidate" &&
                node.node_kind != "merge_candidate")
         rejectReason = "unsupported node_kind";
@@ -10861,6 +11425,17 @@ static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
     } else if (node.node_kind == "release" &&
                !node.parent_model_ids.empty()) {
       rejectReason = "release node must not declare parents";
+
+    } else if (node.node_kind == "development_parent" &&
+               (!node.parent_model_ids.empty() ||
+                node.admission_status != "CANDIDATE" ||
+                node.parent_usage != "DEVELOPMENT_ONLY" ||
+                !node.development_parent_eligible ||
+                node.production_registry_write_allowed)) {
+      rejectReason =
+          "development parent requires no parents, CANDIDATE admission, "
+          "DEVELOPMENT_ONLY usage, eligibility=true and formal registry "
+          "write=false";
     } else if (node.node_kind == "incremental_candidate" &&
                node.parent_model_ids.size() != 1) {
       rejectReason = "incremental candidate requires exactly one parent";
@@ -10888,7 +11463,8 @@ static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
     if (node.parent_selection_reviewed)
       node.parent_selection_review_path = parentReview->second.path;
 
-    node.parent_gate_satisfied = node.node_kind == "release";
+    node.parent_gate_satisfied = node.node_kind == "release" ||
+                                 node.node_kind == "development_parent";
     if (!node.parent_model_ids.empty()) {
       node.parent_gate_satisfied = true;
       for (const std::string &parentId : node.parent_model_ids) {
@@ -10915,7 +11491,12 @@ static void RefreshModelLineageAssetsLocal(ManualTestContext &context) {
     if (node.inference_difference_reviewed)
       node.inference_difference_review_path = differenceReview->second.path;
 
-    if (node.node_kind == "release") {
+    if (node.node_kind == "development_parent") {
+      node.gate_status = "DEVELOPMENT_PARENT_READY";
+      node.gate_reason =
+          "development-only parent is eligible for isolated business trials; "
+          "formal registry write and production promotion remain blocked";
+    } else if (node.node_kind == "release") {
       node.gate_status = node.parent_selection_reviewed
                              ? "PARENT_READY"
                              : "PENDING_PARENT_SELECTION";
@@ -11029,6 +11610,12 @@ int RunModelLineageAssetScanSmoke(const std::string &scanRoot,
     report << "model_node_path" << node.model_node_path;
     report << "display_name" << node.display_name;
     report << "node_kind" << node.node_kind;
+    report << "admission_status" << node.admission_status;
+    report << "parent_usage" << node.parent_usage;
+    report << "development_parent_eligible"
+           << static_cast<int>(node.development_parent_eligible);
+    report << "production_registry_write_allowed"
+           << static_cast<int>(node.production_registry_write_allowed);
     report << "parent_model_ids"
            << "[";
     for (const std::string &parentId : node.parent_model_ids)
@@ -11825,7 +12412,6 @@ void ViewController::drawTorchTrainingImageSetWindow() {
                                   m_manualTest.active_image_id, "val",
                                   "unlabeled", "current_image");
   }
-  ImGui::SameLine();
   if (ImGui::Button("Add Manifest Images##training_primary")) {
     ClearTorchTrainingImageSetForEvidenceSyncLocal(
         m_manualTest, "manual rebuild from selected evidence manifest images");
@@ -11843,7 +12429,164 @@ void ViewController::drawTorchTrainingImageSetWindow() {
           "incrementally added manifest images: " + std::to_string(count);
     }
   }
+  ImGui::SetNextItemWidth(-1.0f);
+  InputTextString("Image path##training_primary",
+                  m_manualTest.torch_training_new_image_path);
+  if (ImGui::Button("Add Path As Train##training_primary")) {
+    AddTorchTrainingImageFromPath(m_manualTest.torch_training_new_image_path,
+                                  "", "train", "unlabeled", "manual_path");
+  }
   ImGui::SameLine();
+  if (ImGui::Button("Add Path As Validation##training_primary")) {
+    AddTorchTrainingImageFromPath(m_manualTest.torch_training_new_image_path,
+                                  "", "val", "unlabeled", "manual_path");
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Add Path As Holdout##training_primary")) {
+    AddTorchTrainingImageFromPath(m_manualTest.torch_training_new_image_path,
+                                  "", "test", "unlabeled", "manual_path");
+  }
+  const int primaryImageCount =
+      static_cast<int>(m_manualTest.torch_training_images.size());
+  const int primarySelectedImage =
+      m_manualTest.selected_torch_training_image;
+  if (primaryImageCount == 0)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Load First Image##training_primary")) {
+    std::string loadReason;
+    if (!LoadTorchTrainingImageIntoAnnotationView(0, loadReason)) {
+      m_manualTest.torch_training_image_status = "IMAGE_LOAD_FAILED";
+      m_manualTest.torch_training_image_reason = loadReason;
+    }
+  }
+  ImGui::SameLine();
+  if (primarySelectedImage <= 0)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Previous Image##training_primary")) {
+    std::string loadReason;
+    LoadTorchTrainingImageIntoAnnotationView(primarySelectedImage - 1,
+                                             loadReason);
+  }
+  if (primarySelectedImage <= 0)
+    ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (primarySelectedImage < 0 ||
+      primarySelectedImage + 1 >= primaryImageCount)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Next Image##training_primary")) {
+    std::string loadReason;
+    LoadTorchTrainingImageIntoAnnotationView(primarySelectedImage + 1,
+                                             loadReason);
+  }
+  if (primarySelectedImage < 0 ||
+      primarySelectedImage + 1 >= primaryImageCount)
+    ImGui::EndDisabled();
+  if (primaryImageCount == 0)
+    ImGui::EndDisabled();
+  if (m_manualTest.selected_torch_training_image >= 0 &&
+      m_manualTest.selected_torch_training_image < primaryImageCount) {
+    TorchTrainingImageItem &selected =
+        m_manualTest.torch_training_images[static_cast<std::size_t>(
+            m_manualTest.selected_torch_training_image)];
+    ImGui::Text("selected: %d / %d | split: %s | label: %s",
+                m_manualTest.selected_torch_training_image + 1,
+                primaryImageCount, selected.split.c_str(),
+                selected.label.c_str());
+    ImGui::TextWrapped("source: %s", selected.image_path.c_str());
+    static const char *kGeometryClassNames[] = {
+        "arc", "circle", "ellipse", "line", "open_curve", "polygon",
+        "closed_curve"};
+    ImGui::SetNextItemWidth(132.0f);
+    ImGui::InputInt("Annotation class id##training_primary",
+                    &m_manualTest.torch_training_annotation_class_id);
+    m_manualTest.torch_training_annotation_class_id = std::clamp(
+        m_manualTest.torch_training_annotation_class_id, 0, 6);
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s",
+                        kGeometryClassNames[
+                            m_manualTest.torch_training_annotation_class_id]);
+    if (ImGui::Button("Apply Class To Current Shapes##training_primary")) {
+      CaptureCurrentTorchTrainingAnnotationState();
+      for (TorchTrainingAnnotationShapeSnapshot &shape :
+           selected.annotation_shapes)
+        shape.class_id = m_manualTest.torch_training_annotation_class_id;
+      selected.annotation_status = selected.annotation_shapes.empty()
+                                       ? "unlabeled"
+                                       : "editing";
+      m_manualTest.torch_training_image_status = "ANNOTATION_CLASS_APPLIED";
+      m_manualTest.torch_training_image_reason =
+          "class_id=" +
+          std::to_string(m_manualTest.torch_training_annotation_class_id) +
+          " applied to current image shapes=" +
+          std::to_string(selected.annotation_shapes.size());
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Current Annotations##training_primary")) {
+      selected.annotation_shapes.clear();
+      selected.annotation_shape_count = 0;
+      selected.annotation_overlay_count = 0;
+      selected.annotation_status = "unlabeled";
+      m_annotationLayer.Clear();
+      m_annotationLayer.ClearShapeElements();
+      CancelAnnotationCreate();
+      m_annotationLayer.SetActiveToolIndex(-1);
+      m_imageToolMode = ImageToolMode::PointerPan;
+      m_manualTest.torch_training_image_status = "ANNOTATIONS_CLEARED";
+      m_manualTest.torch_training_image_reason =
+          "cleared current image annotations; source image unchanged";
+    }
+  } else {
+    ImGui::TextDisabled("selected: none / %d", primaryImageCount);
+  }
+  ImGui::SeparatorText("Selected Image / Visible YOLO Inference");
+  ImGui::SetNextItemWidth(-1.0f);
+  InputTextString("Model manifest##selected_image_inference",
+                  m_manualTest.torch_training_inference_model_manifest);
+  ImGui::SetNextItemWidth(140.0f);
+  InputTextString("Device##selected_image_inference",
+                  m_manualTest.torch_training_inference_device);
+  if (ImGui::Button("Run YOLO On Selected Image##training_primary")) {
+    std::string inferenceReason;
+    RunYoloV8nSelectedImageInferenceFromGui(inferenceReason);
+  }
+  ImGui::SameLine();
+  const bool hasSelectedSource =
+      m_manualTest.selected_torch_training_image >= 0 &&
+      m_manualTest.selected_torch_training_image <
+          static_cast<int>(m_manualTest.torch_training_images.size());
+  if (!hasSelectedSource)
+    ImGui::BeginDisabled();
+  if (ImGui::Button("Restore Selected Source Image##training_primary")) {
+    std::string restoreReason;
+    if (!LoadTorchTrainingImageIntoAnnotationView(
+            m_manualTest.selected_torch_training_image, restoreReason)) {
+      m_manualTest.torch_training_inference_status =
+          "SOURCE_IMAGE_RESTORE_FAILED";
+      m_manualTest.torch_training_inference_reason = restoreReason;
+    }
+  }
+  if (!hasSelectedSource)
+    ImGui::EndDisabled();
+  ImGui::Text("inference: %s | detections: %d | forward: %.3f ms",
+              m_manualTest.torch_training_inference_status.c_str(),
+              m_manualTest.torch_training_inference_detection_count,
+              m_manualTest.torch_training_inference_runtime_ms);
+  ImGui::TextWrapped("%s",
+                     m_manualTest.torch_training_inference_reason.c_str());
+  if (!m_manualTest.torch_training_inference_overlay_ref.empty())
+    ImGui::TextWrapped("overlay: %s",
+                       m_manualTest.torch_training_inference_overlay_ref.c_str());
+  if (!m_manualTest.torch_training_inference_result_ref.empty())
+    ImGui::TextWrapped("result: %s",
+                       m_manualTest.torch_training_inference_result_ref.c_str());
+  if (!m_manualTest.torch_training_inference_candidates_ref.empty())
+    ImGui::TextWrapped(
+        "candidates: %s",
+        m_manualTest.torch_training_inference_candidates_ref.c_str());
+  ImGui::TextDisabled(
+      "The source image is immutable. Inference writes a separate overlay; "
+      "Restore Selected Source Image returns to annotation view.");
+  ImGui::SeparatorText("Dataset Export / Incremental Training");
   if (ImGui::Button("Export Training Dataset##training_primary")) {
     CaptureCurrentTorchTrainingAnnotationState();
     std::string packagePath;
@@ -11874,14 +12617,25 @@ void ViewController::drawTorchTrainingImageSetWindow() {
   if (!hasPrimaryAugmentation)
     ImGui::EndDisabled();
   ImGui::SameLine();
-  if (m_manualTest.torch_training_process_running)
+  bool primaryTrainingAssetMatched = false;
+  const bool primaryTrainingAssetEnabled =
+      EvidenceSelectionTrainingEnabledLocal(
+          m_manualTest.current_evidence_selection,
+          primaryTrainingAssetMatched);
+  const bool primaryTrainingBlocked =
+      m_manualTest.torch_training_process_running ||
+      (primaryTrainingAssetMatched && !primaryTrainingAssetEnabled);
+  if (primaryTrainingBlocked)
     ImGui::BeginDisabled();
   if (ImGui::Button("Run C++ Incremental Training##training_primary")) {
     std::string trainingReason;
     RunYoloV8nIncrementalTrainingFromGui(trainingReason);
   }
-  if (m_manualTest.torch_training_process_running)
+  if (primaryTrainingBlocked)
     ImGui::EndDisabled();
+  if (primaryTrainingAssetMatched && !primaryTrainingAssetEnabled)
+    ImGui::TextDisabled(
+        "Training blocked: selected Evidence asset has training_enabled=0.");
   ImGui::SameLine();
   if (ImGui::Button("Reload Latest Run##training_primary")) {
     std::string loadReason;
@@ -12348,6 +13102,19 @@ void ViewController::drawTorchTrainingImageSetWindow() {
       ImGui::TextWrapped("hash status: %s",
                          node.checkpoint_hash_status.c_str());
       ImGui::TextWrapped("promotion: %s", node.promotion_status.c_str());
+      ImGui::TextWrapped(
+          "admission: %s | parent usage: %s | development eligible: %s",
+          node.admission_status.empty() ? "-" : node.admission_status.c_str(),
+          node.parent_usage.empty() ? "FORMAL_ONLY" : node.parent_usage.c_str(),
+          node.development_parent_eligible ? "yes" : "no");
+      ImGui::TextWrapped(
+          "formal registry write: %s",
+          node.production_registry_write_allowed ? "allowed by asset"
+                                                 : "blocked by asset");
+      if (node.node_kind == "development_parent")
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.72f, 0.22f, 1.0f),
+            "Development trial only: this node can never imply APPROVED or ACTIVE.");
 
       if (ImGui::BeginTable("model_lineage_review_gates", 3,
                             ImGuiTableFlags_Borders |
@@ -12555,13 +13322,21 @@ void ViewController::drawTorchTrainingImageSetWindow() {
     if (!hasAugSelection)
       ImGui::EndDisabled();
     ImGui::SameLine();
-    if (m_manualTest.torch_training_process_running)
+    bool runtimeTrainingAssetMatched = false;
+    const bool runtimeTrainingAssetEnabled =
+        EvidenceSelectionTrainingEnabledLocal(
+            m_manualTest.current_evidence_selection,
+            runtimeTrainingAssetMatched);
+    const bool runtimeTrainingBlocked =
+        m_manualTest.torch_training_process_running ||
+        (runtimeTrainingAssetMatched && !runtimeTrainingAssetEnabled);
+    if (runtimeTrainingBlocked)
       ImGui::BeginDisabled();
     if (ImGui::Button("Run C++ Incremental Training")) {
       std::string trainingReason;
       RunYoloV8nIncrementalTrainingFromGui(trainingReason);
     }
-    if (m_manualTest.torch_training_process_running)
+    if (runtimeTrainingBlocked)
       ImGui::EndDisabled();
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip(
@@ -12985,7 +13760,6 @@ void ViewController::drawTorchTrainingImageSetWindow() {
                                   m_manualTest.active_image_id, "val",
                                   "unlabeled", "current_image");
   }
-  ImGui::SameLine();
   if (ImGui::Button("Add Current As Test")) {
     CXLOG_INFO("TorchTrainingImageSet", "add_current_as_test_button",
                "ui_event",
@@ -13679,6 +14453,10 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
   InputTextString("Filter cases", m_manualTest.script_evidence_case_filter);
   const std::string caseFilter =
       toLower(TrimLine(m_manualTest.script_evidence_case_filter));
+  ImGui::TextDisabled(
+      "Case folders start collapsed. Expanding a folder only reveals its "
+      "asset-backed cases; click one case row to load its script, parameters "
+      "and read-only image.");
 
   auto classifyMajor =
       [&](const ScriptEvidenceThumb &thumb,
@@ -14139,10 +14917,10 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
     ImGui::PushID(static_cast<int>(ci));
 
     std::string header = major.label + " (" + std::to_string(majorCount) + ")";
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_None;
-    // The category level is the primary navigation level.  Open it when
-    // the panel first appears; the user can still collapse it afterwards.
-    flags |= ImGuiTreeNodeFlags_DefaultOpen;
+    // Folder expansion is deliberately separate from case activation. It
+    // never replaces the active project or Image View; a concrete evidence
+    // row performs that activation.
+    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_None;
 
     if (ImGui::CollapsingHeader(header.c_str(), flags)) {
       if (major.tools.empty()) {
@@ -14157,9 +14935,7 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
         ImGui::PushID(static_cast<int>(ti));
         const std::string toolHeader =
             tool.label + " (" + std::to_string(tool.rows.size()) + ")";
-        ImGuiTreeNodeFlags toolFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-        if (major.label == "To Verify" || !caseFilter.empty())
-          toolFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+        const ImGuiTreeNodeFlags toolFlags = ImGuiTreeNodeFlags_OpenOnArrow;
         if (ImGui::TreeNodeEx(toolHeader.c_str(), toolFlags)) {
           for (std::size_t hi = 0; hi < tool.head_folders.size(); ++hi) {
             EvidenceCategory::HeadFolder &head = tool.head_folders[hi];
@@ -14170,9 +14946,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
             ImGui::PushID(static_cast<int>(hi));
             const std::string headHeader =
                 head.label + " (" + std::to_string(headCount) + ")";
-            ImGuiTreeNodeFlags headFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-            if (major.label == "To Verify" || !caseFilter.empty())
-              headFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+            const ImGuiTreeNodeFlags headFlags =
+                ImGuiTreeNodeFlags_OpenOnArrow;
             if (ImGui::TreeNodeEx(headHeader.c_str(), headFlags)) {
               for (const ScriptEvidenceRowRef &ref : head.direct_rows)
                 drawEvidenceRow(ref);
@@ -14183,9 +14958,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
                 const std::string folderHeader =
                     folder.label + " (" + std::to_string(folder.rows.size()) +
                     ")";
-                ImGuiTreeNodeFlags folderFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-                if (major.label == "To Verify" || !caseFilter.empty())
-                  folderFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+                const ImGuiTreeNodeFlags folderFlags =
+                    ImGuiTreeNodeFlags_OpenOnArrow;
                 if (ImGui::TreeNodeEx(folderHeader.c_str(), folderFlags)) {
                   for (const ScriptEvidenceRowRef &ref : folder.rows)
                     drawEvidenceRow(ref);
@@ -14206,9 +14980,8 @@ void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
             const std::string unfolderedHeader =
                 "Unfoldered Cases (" + std::to_string(tool.direct_rows.size()) +
                 ")";
-            ImGuiTreeNodeFlags unfolderedFlags = ImGuiTreeNodeFlags_OpenOnArrow;
-            if (major.label == "To Verify" || !caseFilter.empty())
-              unfolderedFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+            const ImGuiTreeNodeFlags unfolderedFlags =
+                ImGuiTreeNodeFlags_OpenOnArrow;
             if (ImGui::TreeNodeEx(unfolderedHeader.c_str(), unfolderedFlags)) {
               for (const ScriptEvidenceRowRef &ref : tool.direct_rows)
                 drawEvidenceRow(ref);
@@ -14390,6 +15163,12 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
   const ImVec2 rowMax(rowMin.x + rowSize.x, rowMin.y + rowSize.y);
   const bool rowBoundsHovered =
       ImGui::IsMouseHoveringRect(rowMin, rowMax, false);
+  if (rowBoundsHovered) {
+    ImGui::SetTooltip(
+        "Click to load this evidence case's script, parameter snapshot and "
+        "read-only image. Folder expansion alone never changes the active "
+        "case or image.");
+  }
   const bool rowBoundsClicked =
       rowBoundsHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   // The child table/image is drawn above the invisible button. Use the same

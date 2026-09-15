@@ -2164,8 +2164,7 @@ void DrawCxScriptWorkbenchOverview(ManualTestContext &context) {
 }
 
 void DrawEvidenceCaseListPanel(ManualTestContext &context) {
-  if (!ImGui::CollapsingHeader("Evidence Case List",
-                               ImGuiTreeNodeFlags_DefaultOpen))
+  if (!ImGui::CollapsingHeader("Evidence Case List"))
     return;
 
   ImGui::TextWrapped("Evidence cases organized by "
@@ -3308,6 +3307,10 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   ImGui::TextDisabled("0 keeps the original orthogonal FastMatch scan. Positive "
                       "and negative degrees rotate the four learn probe bands "
                       "around the Learn ROI center before learn/match.");
+  ImGui::TextDisabled(
+      "Rotation is template pose: ROI move/resize preserves it; only this "
+      "control changes it. Image View shows the same orientation preview "
+      "before Learn.");
 
   bool filterprofileEdited = ImGui::SliderInt(
       "##fm_learn_filterprofile", &gauge.filterprofile, 0, 10);
@@ -3330,7 +3333,7 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   shared = shared != 0 ? 1 : 0;
   bool sharedBool = shared != 0;
   const bool sharedModeChanged = ImGui::Checkbox(
-      "Use one shared learn parameter set for 4 directions", &sharedBool);
+      "Share learn values with paired exterior polarity", &sharedBool);
   if (sharedModeChanged) {
     shared = sharedBool ? 1 : 0;
     InjectManualGaugeInt(context, "global_fastmatch_learn_shared", shared);
@@ -3367,16 +3370,23 @@ static bool DrawFastMatchLearnParameterControls(ManualTestContext &context) {
   };
 
   // Shared mode makes each shared edit one explicit write to all directions.
-  // Never copy per frame because that would destroy intentionally independent
-  // directional values.
+  // Physical widths are transposed for the vertical pair and transition
+  // polarity is reversed for Bottom/Right. Never copy per frame because that
+  // would destroy intentionally independent directional values.
   const bool copySharedButton =
       ImGui::Button("Copy Shared Learn Params To 4 Directions");
   const bool copySharedNow = copySharedButton ||
       (shared != 0 && (sharedModeChanged || sharedParamsEdited));
   if (copySharedNow) {
     for (int dir = 0; dir < 4; ++dir) {
-      seedDirection(dir, gauge.threshold, gauge.method, gauge.linegap,
-                    gauge.wgap, gauge.hgap, sharedObjfilter, sharedCompareGap);
+      const bool horizontalEdge = dir < 2;
+      const bool oppositeSide = dir == 1 || dir == 3;
+      seedDirection(dir, gauge.threshold,
+                    oppositeSide ? (gauge.method ^ 1) : gauge.method,
+                    gauge.linegap,
+                    horizontalEdge ? gauge.wgap : gauge.hgap,
+                    horizontalEdge ? gauge.hgap : gauge.wgap,
+                    sharedObjfilter, sharedCompareGap);
     }
     edited = true;
   }
@@ -3856,8 +3866,10 @@ static bool DrawFastMatchMatchParameterControls(ManualTestContext &context) {
       "global_fastmatch_normaltrace_overlap_radius_px", 3, 0, 64, 250.0f);
   edited |= DrawRuntimeIntRow(context, "Dijkstra maximum nodes",
       "global_fastmatch_normaltrace_max_nodes", 4096, 32, 200000, 250.0f);
-  edited |= DrawRuntimeIntRow(context, "normal pair offset px",
-      "global_fastmatch_normaltrace_pair_offset_px", 6, 1, 128, 250.0f);
+  ImGui::TextDisabled(
+      "Normal A/B offset uses Directional Learn -> compare gap. It is the "
+      "distance from the keypoint to each polarity point; total A-B distance "
+      "is 2 x compare gap. There is no second spacing value in Normal-Trace.");
   ImGui::TextDisabled(
       "Legacy minimum-gradient and gradient-cost values remain script-compatible "
       "but are ignored by the conclusion graph.");
@@ -4394,7 +4406,7 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
                       "tab chooses Edge N or Last, its accepted points are "
                       "the normal-pair source for Learn status 34.");
   const char* probeNames[] = {"Top", "Bottom", "Left", "Right"};
-  if (ImGui::BeginTable("fastmatch_directional_probe_evidence", 6,
+  if (ImGui::BeginTable("fastmatch_directional_probe_evidence", 7,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupColumn("Probe");
@@ -4402,6 +4414,7 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
     ImGui::TableSetupColumn("Raw");
     ImGui::TableSetupColumn("Accepted side");
     ImGui::TableSetupColumn("Point Column");
+    ImGui::TableSetupColumn("Compare gap");
     ImGui::TableSetupColumn("Status");
     ImGui::TableHeadersRow();
     for (int direction = 0; direction < 4; ++direction) {
@@ -4435,6 +4448,9 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
       ImGui::SameLine();
       ImGui::TextDisabled("(%s)", runtimeLabel.c_str());
       ImGui::TableSetColumnIndex(5);
+      ImGui::Text("%d px",
+                  object->fastmatch_directional_probe_compare_gap[index]);
+      ImGui::TableSetColumnIndex(6);
       const std::string& status =
           object->fastmatch_directional_probe_status[index];
       ImGui::TextUnformatted(status.empty() ? "NOT_RUN" : status.c_str());
@@ -4452,16 +4468,21 @@ static void DrawFastMatchTemplateStatusPanel(const ManualTestContext &context) {
               object->fastmatch_match_rect_y0, object->fastmatch_match_rect_x1,
               object->fastmatch_match_rect_y1);
 
-  const int compareGap = RuntimeIntOr(context, "global_compare_gap", 20);
   const int pairCount = std::min(object->fastmatch_pattern_a_count,
                                  object->fastmatch_pattern_b_count);
   const int unpairedA = std::max(0, object->fastmatch_pattern_a_count - pairCount);
   const int unpairedB = std::max(0, object->fastmatch_pattern_b_count - pairCount);
   const bool learnHasPairs = pairCount > 0;
-  ImGui::Text("learn conclusion: compare_gap=%d pairs=%d unpaired(A/B)=%d/%d",
-              compareGap, pairCount, unpairedA, unpairedB);
-  ImGui::TextDisabled("compare_gap is the positive/negative A/B distance from "
-                      "keypoints; tangents are adjacent keypoint-midpoint "
+  ImGui::Text(
+      "learn conclusion: applied compare gap Top/Bottom/Left/Right=%d/%d/%d/%d px | pairs=%d unpaired(A/B)=%d/%d",
+      object->fastmatch_directional_probe_compare_gap[0],
+      object->fastmatch_directional_probe_compare_gap[1],
+      object->fastmatch_directional_probe_compare_gap[2],
+      object->fastmatch_directional_probe_compare_gap[3], pairCount, unpairedA,
+      unpairedB);
+  ImGui::TextDisabled("Applied values above come from the completed Learn, not the current editor. "
+                      "compare_gap is the keypoint-to-A/B offset; total A-B "
+                      "distance is twice it. Tangents are adjacent keypoint-midpoint "
                       "vectors. Red points mean filtered/unpaired display "
                       "state, not a promoted PASS/FAIL conclusion.");
   if (!learnHasPairs)
@@ -8940,6 +8961,9 @@ if (isCxTextInspect) {
     gaugeEdited |= DrawRuntimeIntRow(context, "scan rotation deg",
                                      "global_fastmatch_scan_rotation_deg", 0,
                                      -180, 180, 150.0f);
+    ImGui::TextDisabled(
+        "Template pose is preserved during ROI move/resize. The purple "
+        "outline in Image View is the exact orientation that Learn will use.");
     const int affineExecuted = RuntimeIntOr(
         context, "global_fastmatch_transform_executed", 0);
     if (affineExecuted != 0) {
@@ -8987,7 +9011,8 @@ if (isCxTextInspect) {
     ImGui::TextDisabled("Image View colors: cyan=A side, orange=B side, "
                         "yellow=keypoint midpoint, magenta=adjacent-point "
                         "tangent, red=filtered/unpaired point. compare_gap is "
-                        "the A/B point-pair distance generated from keypoints.");
+                        "the keypoint-to-A/B offset; total pair distance is "
+                        "twice this value.");
 
     DrawFastMatchTemplateStatusPanel(context);
   }
