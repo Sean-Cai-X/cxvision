@@ -36,9 +36,9 @@
         "O2_open_complex_boundary"
       ],
       "candidate_model_families": [
-        "edge_aware_segmentation",
-        "prompt_boundary_segmentation",
-        "boundary_probability_model"
+        "boundary_probability_backbone",
+        "edge_aware_boundary_map_model",
+        "ordered_boundary_trace_and_geometry_head"
       ],
       "parent_binding": "pending",
       "child_binding": "pending"
@@ -74,9 +74,13 @@
         "O1_open_regular_boundary"
       ],
       "candidate_model_families": [
-        "line_arc_boundary_model",
-        "edge_aware_boundary_model"
+        "mobilenetv3_deeplab_segmentation_backbone_with_boundary_head",
+        "yolov8_seg_mask_contour_adapter_with_geometry_head",
+        "boundary_probability_backbone",
+        "ordered_boundary_trace_and_geometry_head",
+        "line_arc_open_curve_fit_head"
       ],
+      "parent_reuse_policy": "reuse_a_compatible_segmentation_parent_and_add_boundary_probability_trace_and_geometry_heads; do_not_train_line_like_object_detection",
       "parent_binding": "pending",
       "child_binding": "pending"
     },

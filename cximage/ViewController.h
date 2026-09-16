@@ -412,7 +412,12 @@ public:
                                std::string& reason);
     bool BuildMagicWandFormFitNodes(const std::vector<cv::Point>& contour,
                                     std::string& reason);
+    bool BuildSegmentationPromptBoundaryPreview(std::string& reason);
+    bool CommitSegmentationPromptBoundary(CxImagePointerResult& out);
     bool CommitMagicWandPreview(CxImagePointerResult& out);
+    bool BuildOpenBoundaryFormFit(const std::vector<CxShapePoint>& points,
+                                  std::string& reason);
+    bool CommitOpenBoundaryFormFit(CxImagePointerResult& out);
     bool WriteBusinessAnnotationReceipt(
         const CxShapeElement& element, const AnnotationToolDefinition& tool,
         const std::string& operation, const std::string& status,
@@ -705,11 +710,24 @@ private:
     int m_magicWandNodeizationMode = 0;
     int m_magicWandMaximumNodes = 64;
     float m_magicWandMinimumNodeSpacingPixels = 4.0f;
+    // Business-facing anchor-selection policy for closed boundaries.  The
+    // seed/prompt still drives segmentation; this selects a reproducible key
+    // point on the resulting contour for review, FormFit and receipts.
+    int m_boundaryAnchorMode = 0;
+    OverlayImagePoint m_boundaryAnchor;
     int m_magicWandRegionPixels = 0;
     int m_magicWandRawBoundaryPointCount = 0;
     int m_magicWandFormFitNodeCount = 0;
     std::string m_magicWandStatus = "MAGIC_WAND_IDLE";
     std::string m_magicWandFormFitStatus = "FORMFIT_NODE_IDLE";
+    int m_promptBoundaryGrabCutIterations = 3;
+    std::vector<CxShapePoint> m_openBoundaryRawPoints;
+    std::vector<CxShapePoint> m_openBoundaryPreviewPoints;
+    std::string m_openBoundaryType = "open_curve";
+    double m_openBoundaryLineResidualPx = 0.0;
+    double m_openBoundaryArcResidualPx = 0.0;
+    double m_openBoundaryFitResidualPx = 0.0;
+    std::string m_openBoundaryStatus = "OPEN_BOUNDARY_IDLE";
     bool m_attachToScriptMode = false;
     bool m_showSourcePreviewOverlay = false;
     ImageToolMode m_imageToolMode = ImageToolMode::PointerPan;

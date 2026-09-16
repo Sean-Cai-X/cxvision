@@ -52,7 +52,12 @@
       "case_tracks": [
         "O1"
       ],
-      "output_contract": "polyline_measurement_points_endpoints_and_confidence",
+      "output_contract": "segmentation_boundary_probability_map_ordered_polyline_endpoints_geometry_fit_and_confidence",
+      "parent_reuse": [
+        "mobilenetv3_deeplab_semantic_segmentation_with_boundary_head",
+        "yolov8_seg_instance_mask_with_contour_adapter_and_geometry_head"
+      ],
+      "forbidden_direction": "line_like_object_detection",
       "parent_binding": "pending",
       "child_binding": "pending"
     },

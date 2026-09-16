@@ -57,15 +57,21 @@
       "required": [
         "image",
         "boundary_polyline",
-        "valid_endpoint_flags"
+        "valid_endpoint_flags",
+        "boundary_role"
       ],
       "optional": [
+        "boundary_probability_map",
+        "line_fit",
+        "arc_fit",
+        "open_curve_fit",
         "width_samples",
         "length"
       ],
       "forbidden_substitutions": [
         "forced_closed_mask",
-        "bbox_as_boundary"
+        "bbox_as_boundary",
+        "line_like_object_class_as_boundary"
       ]
     },
     {
@@ -111,20 +117,25 @@
       "track_id": "O1",
       "required": [
         "image",
-        "boundary_polyline",
+        "boundary_centerline_polyline",
         "measurement_points",
-        "valid_endpoint_flags"
+        "valid_endpoint_flags",
+        "boundary_role"
       ],
       "optional": [
         "line_fit",
         "arc_fit",
+        "open_curve_fit",
+        "tangent_or_normal",
+        "curvature",
         "length",
         "confidence"
       ],
       "forbidden_substitutions": [
         "forced_closed_mask",
         "bbox_as_boundary",
-        "folder_label_as_boundary"
+        "folder_label_as_boundary",
+        "line_like_object_class_as_boundary"
       ]
     },
     {

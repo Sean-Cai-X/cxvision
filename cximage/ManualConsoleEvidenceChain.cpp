@@ -4839,6 +4839,8 @@ static int AppendAssetDrivenEvidenceCasesLocal(
           FileNodeStringLocal(manifest.root(), "result_summary");
       const std::string scriptRef =
           FileNodeStringLocal(manifest.root(), "script_snapshot");
+      const std::string imageSetDirRef =
+          FileNodeStringLocal(manifest.root(), "image_set_dir");
       std::string caseTool = NormalizeEvidenceToolTypeLocal(
           FileNodeStringLocal(manifest.root(), "tool"));
       if (caseTool.empty())
@@ -4886,6 +4888,51 @@ static int AppendAssetDrivenEvidenceCasesLocal(
                "script_snapshot is absent from required_assets: " +
                    scriptRef);
         assetsValid = false;
+      }
+      std::vector<std::filesystem::path> imageSetPaths;
+      if (assetsValid && !imageSetDirRef.empty()) {
+        const std::filesystem::path imageSetDir = caseDirectory / imageSetDirRef;
+        if (!IsAssetCasePathWithinRootLocal(caseDirectory, imageSetDir) ||
+            !IsAssetCasePathWithinRootLocal(runRoot, imageSetDir) ||
+            !std::filesystem::is_directory(imageSetDir, entryError) ||
+            std::filesystem::is_symlink(imageSetDir, entryError)) {
+          reject(manifestPath, "image_set_dir is missing or unsafe: " + imageSetDirRef);
+          assetsValid = false;
+        } else {
+          std::filesystem::recursive_directory_iterator imageIterator(
+              imageSetDir, std::filesystem::directory_options::skip_permission_denied,
+              entryError);
+          const std::filesystem::recursive_directory_iterator imageEnd;
+          while (assetsValid && imageIterator != imageEnd) {
+            if (entryError) {
+              reject(manifestPath, "image_set_dir iteration failed: " + entryError.message());
+              assetsValid = false;
+              break;
+            }
+            const std::filesystem::directory_entry imageEntry = *imageIterator;
+            std::error_code imageError;
+            if (imageEntry.is_symlink(imageError)) {
+              if (imageEntry.is_directory(imageError))
+                imageIterator.disable_recursion_pending();
+              imageIterator.increment(entryError);
+              continue;
+            }
+            if (imageEntry.is_regular_file(imageError)) {
+              std::string extension = imageEntry.path().extension().string();
+              std::transform(extension.begin(), extension.end(), extension.begin(),
+                             [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+              if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+                  extension == ".bmp" || extension == ".tif" || extension == ".tiff")
+                imageSetPaths.push_back(imageEntry.path());
+            }
+            imageIterator.increment(entryError);
+          }
+          std::sort(imageSetPaths.begin(), imageSetPaths.end());
+          if (assetsValid && imageSetPaths.empty()) {
+            reject(manifestPath, "image_set_dir contains no supported immutable images");
+            assetsValid = false;
+          }
+        }
       }
       if (!assetsValid) {
         iterator.increment(iteratorError);
@@ -4938,6 +4985,9 @@ static int AppendAssetDrivenEvidenceCasesLocal(
             FileNodeStringLocal(manifest.root(), "degradation_bucket") +
             " training_enabled=0";
       }
+      if (!imageSetPaths.empty())
+        thumb.parameter_summary += " image_set_count=" +
+                                   std::to_string(imageSetPaths.size());
       thumb.evidence_output_root = caseDirectory.string();
       thumb.contract_id = FileNodeStringLocal(manifest.root(), "schema");
       thumb.expected_result = summaryRef;
@@ -4985,11 +5035,6 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       std::string workingStateReason;
       RestoreAssetCaseWorkingStateLocal(caseDirectory, internalCaseId, thumb,
                                         workingStateReason);
-      CxEvidenceDatasetImageBinding sourceBinding;
-      sourceBinding.image_id = internalCaseId;
-      sourceBinding.image_path = sourcePath.string();
-      sourceBinding.split = evidenceSplit;
-      sourceBinding.label = thumb.target_id;
       std::string sourceHash;
       cv::FileStorage geometryFacts;
       try {
@@ -5001,10 +5046,32 @@ static int AppendAssetDrivenEvidenceCasesLocal(
       if (geometryFacts.isOpened())
         sourceHash =
             FileNodeStringLocal(geometryFacts.root(), "source_input_sha256");
-      sourceBinding.source = sourceHash.empty()
-                                 ? "evidence_case_manifest"
-                                 : "source_hash:" + sourceHash;
-      thumb.dataset_images.push_back(sourceBinding);
+      if (imageSetPaths.empty()) {
+        CxEvidenceDatasetImageBinding sourceBinding;
+        sourceBinding.image_id = internalCaseId;
+        sourceBinding.image_path = sourcePath.string();
+        sourceBinding.split = evidenceSplit;
+        sourceBinding.label = thumb.target_id;
+        sourceBinding.source = sourceHash.empty()
+                                   ? "evidence_case_manifest"
+                                   : "source_hash:" + sourceHash;
+        thumb.dataset_images.push_back(sourceBinding);
+      } else {
+        for (const std::filesystem::path &imagePath : imageSetPaths) {
+          std::error_code imageRelativeError;
+          const std::filesystem::path imageRelative =
+              std::filesystem::relative(imagePath, caseDirectory, imageRelativeError);
+          CxEvidenceDatasetImageBinding imageBinding;
+          imageBinding.image_id = internalCaseId + "::" +
+                                  (imageRelativeError ? imagePath.filename().string()
+                                                      : imageRelative.generic_string());
+          imageBinding.image_path = imagePath.string();
+          imageBinding.split = evidenceSplit;
+          imageBinding.label = thumb.target_id;
+          imageBinding.source = "evidence_image_set:" + imageSetDirRef;
+          thumb.dataset_images.push_back(std::move(imageBinding));
+        }
+      }
 
       int classId = 0;
       const cv::FileNode classIdNode = manifest.root()["class_id"];
@@ -14456,6 +14523,23 @@ static void DrawFastMatchNormalTraceEvidenceLocal(
 }
 
 void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
+  if (ImGui::Button("Reload Evidence Assets")) {
+    for (auto &group : m_manualTest.script_evidence_groups) {
+      for (auto &thumb : group.thumbs)
+        ResetEvidenceThumbTexture(thumb);
+    }
+    m_manualTest.script_evidence_groups_dirty = true;
+    m_manualTest.script_evidence_row_refs_dirty = true;
+    m_manualTest.debug_status = "EVIDENCE_ASSET_RELOAD_QUEUED";
+    m_manualTest.debug_reason =
+        "requested rescan of registered asset roots; no image or review state was modified";
+    CXLOG_INFO("EvidenceChain", "asset_reload", "queued",
+               m_manualTest.debug_reason);
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled(
+      "Rescans registered Evidence roots; source images and review decisions remain unchanged.");
+
   RefreshHiddenEvidenceCaseCatalogLocal(m_manualTest);
   if (ImGui::CollapsingHeader("Add Hidden Evidence Case", ImGuiTreeNodeFlags_None)) {
     ImGui::TextDisabled(

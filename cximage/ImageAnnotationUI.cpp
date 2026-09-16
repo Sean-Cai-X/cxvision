@@ -22,6 +22,7 @@
 #include "LineGaugeShape.h"
 #include "ManualConsoleCxScriptDebug.h"
 #include "ManualConsoleGauge.h"
+#include "ManualConsoleUtils.h"
 #include "PolylineShape.h"
 #include "RectShape.h"
 #include "shapebase.h"
@@ -758,14 +759,9 @@ bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
     std::string &reason) {
   reason.clear();
   ManualGaugeState &gauge = m_manualTest.current_gauge;
-  const bool isFindSegmentation =
-      gauge.tool == "FindSegmentation" ||
-      gauge.primary_object_type == "FindSegmentation" ||
-      m_manualTest.editor_text.find("FindSegmentation") != std::string::npos;
-  if (!isFindSegmentation) {
-    reason = "not a FindSegmentation context";
-    return false;
-  }
+  // Annotation Tools can be used before a Manual State Test script is
+  // selected. Seg +/- ShapeElements are therefore the Auto Boundary source of
+  // truth; the previous gauge/script context must not block point inference.
 
   std::vector<ManualSegmentationPromptPoint> positivePoints;
   std::vector<ManualSegmentationPromptPoint> negativePoints;
@@ -838,33 +834,10 @@ bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
   std::sort(negativePoints.begin(), negativePoints.end(), sortByRef);
 
   if (!foundPromptRect) {
-    auto readInt = [this](const std::string &key, int fallback) {
-      const auto it = m_manualTest.runtime_int_vars.find(key);
-      return it == m_manualTest.runtime_int_vars.end() ? fallback : it->second;
-    };
-    const int x0 = std::max(
-        0, readInt("global_roi_x0",
-                   readInt("global_roi_x", gauge.segmentation_prompt_x0)));
-    const int y0 = std::max(
-        0, readInt("global_roi_y0",
-                   readInt("global_roi_y", gauge.segmentation_prompt_y0)));
-    const int x1 = std::max(
-        x0 + 1,
-        readInt("global_roi_x1",
-                x0 + readInt("global_roi_width",
-                             std::max(1, gauge.segmentation_prompt_x1 -
-                                             gauge.segmentation_prompt_x0))));
-    const int y1 = std::max(
-        y0 + 1,
-        readInt("global_roi_y1",
-                y0 + readInt("global_roi_height",
-                             std::max(1, gauge.segmentation_prompt_y1 -
-                                             gauge.segmentation_prompt_y0))));
-    gauge.segmentation_prompt_x0 = x0;
-    gauge.segmentation_prompt_y0 = y0;
-    gauge.segmentation_prompt_x1 = x1;
-    gauge.segmentation_prompt_y1 = y1;
-    gauge.has_segmentation_prompt_rect = true;
+    // Point-only Auto Boundary must not synthesize an ROI from globals or a
+    // stale gauge. A synthetic rectangle was invisible but still recorded as
+    // a segmentation input, hiding the real Seg +/- contract.
+    gauge.has_segmentation_prompt_rect = false;
   }
 
   if (positivePoints.empty() && negativePoints.empty()) {
@@ -884,7 +857,7 @@ bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
 
     std::ostringstream ss;
 
-    ss << "no prompt point ShapeElements; preserved gauge prompt lists"
+    ss << "no Seg +/- point ShapeElements found"
 
        << " positive_points=" << gauge.segmentation_positive_points.size()
 
@@ -922,13 +895,17 @@ bool ViewController::SyncFindSegmentationPromptListsFromShapeElements(
   ss << "positive_points=" << gauge.segmentation_positive_points.size()
      << " negative_points=" << gauge.segmentation_negative_points.size()
      << " prompt_rect=" << (gauge.has_segmentation_prompt_rect ? 1 : 0)
-     << " globals=" << (globalsApplied ? "applied" : "failed");
+     << " globals=" << (globalsApplied ? "applied" : "pending")
+     << " local_point_prompt=ready";
   reason = ss.str();
   CXLOG_INFO("ImageAnnotationUI", "findsegmentation_prompt_lists_synced",
-             globalsApplied ? "updated" : "failed", reason);
-  return globalsApplied &&
-         (changed || !gauge.segmentation_positive_points.empty() ||
-          !gauge.segmentation_negative_points.empty());
+             globalsApplied ? "updated" : "local_ready_globals_pending", reason);
+  // Point-prompt boundary inference is a local Image View operation.  It must
+  // remain available even when there is no loaded CxScript runtime to receive
+  // legacy global_* writeback.  Global export is kept as an observable
+  // follow-up state, not an execution prerequisite.
+  return changed || !gauge.segmentation_positive_points.empty() ||
+         !gauge.segmentation_negative_points.empty();
 }
 
 bool ViewController::ApplyCurrentGaugeToEditableShape(std::string &reason) {
@@ -1673,9 +1650,75 @@ ToolModeFromAnnotationTool(const AnnotationToolDefinition &tool) {
   return ImageToolMode::PointerPan;
 }
 
+const char *BoundaryAnchorModeKey(int mode) {
+  static const char *keys[] = {
+      "custom", "center_nearest", "contour_midpoint", "x_nearest",
+      "y_nearest", "x_minus", "x_plus", "y_plus", "y_minus"};
+  return keys[std::clamp(mode, 0, static_cast<int>(IM_ARRAYSIZE(keys)) - 1)];
+}
+
+const char *const *BoundaryAnchorModeLabels() {
+  static const char *labels[] = {
+      "Custom (manual seed / first Seg +)",
+      "Center nearest (nearest contour point)",
+      "Contour midpoint (half perimeter)",
+      "X nearest (nearest image mid-height)",
+      "Y nearest (nearest image mid-width)",
+      "X- (leftmost contour point)",
+      "X+ (rightmost contour point)",
+      "Y+ (topmost contour point)",
+      "Y- (bottommost contour point)"};
+  return labels;
+}
+
+cv::Point SelectBoundaryAnchor(const std::vector<cv::Point> &contour,
+                               const cv::Point &custom,
+                               const cv::Size &imageSize, int mode) {
+  if (contour.empty())
+    return custom;
+  const int selected = std::clamp(mode, 0, 8);
+  if (selected == 0)
+    return custom;
+  if (selected == 2) {
+    double perimeter = 0.0;
+    for (std::size_t index = 1; index < contour.size(); ++index)
+      perimeter += cv::norm(contour[index] - contour[index - 1]);
+    perimeter += cv::norm(contour.front() - contour.back());
+    const double half = perimeter * 0.5;
+    double travelled = 0.0;
+    for (std::size_t index = 1; index < contour.size(); ++index) {
+      const double segment = cv::norm(contour[index] - contour[index - 1]);
+      if (travelled + segment >= half)
+        return contour[index];
+      travelled += segment;
+    }
+    return contour[contour.size() / 2];
+  }
+  const cv::Point center(imageSize.width / 2, imageSize.height / 2);
+  auto best = contour.begin();
+  auto score = [&](const cv::Point &point) {
+    switch (selected) {
+    case 1: return Distance2(point.x, point.y, center.x, center.y);
+    case 3: return static_cast<double>(std::abs(point.y - center.y));
+    case 4: return static_cast<double>(std::abs(point.x - center.x));
+    case 5: return static_cast<double>(point.x);
+    case 6: return static_cast<double>(-point.x);
+    case 7: return static_cast<double>(point.y);
+    case 8: return static_cast<double>(-point.y);
+    default: return 0.0;
+    }
+  };
+  for (auto it = std::next(contour.begin()); it != contour.end(); ++it) {
+    if (score(*it) < score(*best))
+      best = it;
+  }
+  return *best;
+}
+
 void ViewController::ClearMagicWandPreview(const std::string &status) {
   m_magicWandPreviewPoints.clear();
   m_magicWandRawBoundaryPoints.clear();
+  m_boundaryAnchor = {};
   m_magicWandRegionPixels = 0;
   m_magicWandRawBoundaryPointCount = 0;
   m_magicWandFormFitNodeCount = 0;
@@ -1752,7 +1795,7 @@ bool ViewController::WriteBusinessAnnotationReceipt(
            << BusinessReceiptJsonEscape(imageLogicalRef) << "\",\n"
            << "  \"image_width\": " << m_imageViewImage.cols << ",\n"
            << "  \"image_height\": " << m_imageViewImage.rows << ",\n"
-           << "  \"tool\": \"" << BusinessReceiptJsonEscape(tool.id)
+           << "  \"tool\": \"" << BusinessReceiptJsonEscape(tool.name)
            << "\",\n"
            << "  \"operation\": \""
            << BusinessReceiptJsonEscape(operation) << "\",\n"
@@ -1791,6 +1834,10 @@ bool ViewController::WriteBusinessAnnotationReceipt(
     if (tool.action == "magic_wand_boundary") {
       output << "  \"seed\": {\"x\":" << m_magicWandSeed.x
              << ",\"y\":" << m_magicWandSeed.y << "},\n"
+             << "  \"boundary_anchor\": {\"mode\": \""
+             << BoundaryAnchorModeKey(m_boundaryAnchorMode) << "\", \"x\":"
+             << m_boundaryAnchor.x << ",\"y\":" << m_boundaryAnchor.y
+             << "},\n"
              << "  \"parameters\": {\"algorithm\": \""
              << (m_magicWandAlgorithm == 0 ? "color_fixed_range_v1"
                                            : "color_connected_range_v1")
@@ -1805,6 +1852,36 @@ bool ViewController::WriteBusinessAnnotationReceipt(
              << m_magicWandRawBoundaryPointCount << ",\n"
              << "  \"node_count\": " << m_magicWandFormFitNodeCount
              << ",\n";
+    } else if (tool.action == "auto_segmentation") {
+      output << "  \"seed\": {\"x\":" << m_magicWandSeed.x
+             << ",\"y\":" << m_magicWandSeed.y << "},\n"
+             << "  \"boundary_anchor\": {\"mode\": \""
+             << BoundaryAnchorModeKey(m_boundaryAnchorMode) << "\", \"x\":"
+             << m_boundaryAnchor.x << ",\"y\":" << m_boundaryAnchor.y
+             << "},\n"
+             << "  \"parameters\": {\"algorithm\": \"local_point_prompt_segmentation_v1\""
+             << ", \"grabcut_iterations\": "
+             << m_promptBoundaryGrabCutIterations
+             << ", \"prompt_rectangle_used\": false"
+             << ", \"node_residual_px\": " << m_magicWandSimplifyPixels
+             << ", \"maximum_nodes\": " << m_magicWandMaximumNodes
+             << ", \"minimum_node_spacing_px\": "
+             << m_magicWandMinimumNodeSpacingPixels << "},\n"
+             << "  \"raw_boundary_point_count\": "
+             << m_magicWandRawBoundaryPointCount << ",\n"
+             << "  \"node_count\": " << m_magicWandFormFitNodeCount
+             << ",\n";
+    } else if (tool.action == "open_boundary_formfit") {
+      output << "  \"seed\": null,\n"
+             << "  \"parameters\": {\"boundary_role\": \"physical_interface\""
+             << ", \"geometry_candidate\": \"" << m_openBoundaryType
+             << "\", \"fit_rms_px\": " << m_openBoundaryFitResidualPx
+             << ", \"line_rms_px\": " << m_openBoundaryLineResidualPx
+             << ", \"arc_rms_px\": " << m_openBoundaryArcResidualPx
+             << "},\n"
+             << "  \"raw_boundary_point_count\": "
+             << m_openBoundaryRawPoints.size() << ",\n"
+             << "  \"node_count\": " << points.size() << ",\n";
     } else {
       output << "  \"seed\": null,\n"
              << "  \"parameters\": {},\n"
@@ -1965,6 +2042,10 @@ bool ViewController::BuildMagicWandPreview(double imageX, double imageY,
     return false;
   }
   m_magicWandSeed = {static_cast<float>(seedX), static_cast<float>(seedY)};
+  const cv::Point boundaryAnchor = SelectBoundaryAnchor(
+      *largest, cv::Point(seedX, seedY), source.size(), m_boundaryAnchorMode);
+  m_boundaryAnchor = {static_cast<float>(boundaryAnchor.x),
+                      static_cast<float>(boundaryAnchor.y)};
   m_magicWandRegionPixels = regionPixels;
   m_magicWandStatus = "MAGIC_WAND_PREVIEW_READY";
   reason = "local seed boundary preview: region_pixels=" +
@@ -1975,6 +2056,343 @@ bool ViewController::BuildMagicWandPreview(double imageX, double imageY,
                                   : "color_connected_range_v1") +
            ", tolerance=" + std::to_string(tolerance) +
            ", connectivity=" + std::to_string(connectivity);
+  reason += ", boundary_anchor=" +
+            std::string(BoundaryAnchorModeKey(m_boundaryAnchorMode)) + "(" +
+            std::to_string(boundaryAnchor.x) + "," +
+            std::to_string(boundaryAnchor.y) + ")";
+  return true;
+}
+
+bool ViewController::BuildSegmentationPromptBoundaryPreview(
+    std::string &reason) {
+  ClearMagicWandPreview("PROMPT_BOUNDARY_RUNNING");
+  if (m_imageViewImage.empty()) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_NO_IMAGE";
+    reason = "no local image is loaded";
+    return false;
+  }
+
+  std::string syncReason;
+  if (!SyncFindSegmentationPromptListsFromShapeElements(syncReason)) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_PROMPT_SYNC_FAILED";
+    reason = syncReason;
+    return false;
+  }
+  const ManualGaugeState &gauge = m_manualTest.current_gauge;
+  if (gauge.segmentation_positive_points.empty()) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_NEEDS_FOREGROUND";
+    reason = "add at least one Seg + Point (foreground) before running Prompt Boundary";
+    return false;
+  }
+
+  cv::Mat source;
+  if (m_imageViewImage.channels() == 1) {
+    cv::cvtColor(m_imageViewImage, source, cv::COLOR_GRAY2BGR);
+  } else if (m_imageViewImage.channels() == 4) {
+    cv::cvtColor(m_imageViewImage, source, cv::COLOR_BGRA2BGR);
+  } else if (m_imageViewImage.channels() == 3) {
+    source = m_imageViewImage;
+  } else {
+    m_magicWandStatus = "PROMPT_BOUNDARY_UNSUPPORTED_IMAGE";
+    reason = "image channel format is not supported";
+    return false;
+  }
+
+  // Auto Boundary is deliberately point-prompt only.  A rectangle is not a
+  // segmentation input or output for this tool: Seg +/- points establish the
+  // local foreground/background priors and inference returns a contour.
+  cv::Mat mask(source.rows, source.cols, CV_8UC1, cv::Scalar(cv::GC_PR_BGD));
+
+  const auto markPromptPoints = [&](const std::vector<ManualSegmentationPromptPoint> &points,
+                                    int label) {
+    for (const ManualSegmentationPromptPoint &point : points) {
+      if (point.x < 0 || point.y < 0 || point.x >= source.cols ||
+          point.y >= source.rows)
+        continue;
+      const cv::Point seed(point.x, point.y);
+      if (label == cv::GC_FGD) {
+        cv::circle(mask, seed, 12, cv::Scalar(cv::GC_PR_FGD), -1, cv::LINE_8);
+        cv::circle(mask, seed, 4, cv::Scalar(cv::GC_FGD), -1, cv::LINE_8);
+      } else {
+        cv::circle(mask, seed, 12, cv::Scalar(cv::GC_BGD), -1, cv::LINE_8);
+      }
+    }
+  };
+  markPromptPoints(gauge.segmentation_positive_points, cv::GC_FGD);
+  markPromptPoints(gauge.segmentation_negative_points, cv::GC_BGD);
+
+  cv::Mat bgdModel;
+  cv::Mat fgdModel;
+  try {
+    cv::grabCut(source, mask, cv::Rect(), bgdModel, fgdModel,
+                std::clamp(m_promptBoundaryGrabCutIterations, 1, 10),
+                cv::GC_INIT_WITH_MASK);
+  } catch (const cv::Exception &exception) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_GRABCUT_FAILED";
+    reason = "local Prompt Boundary failed: " + std::string(exception.what());
+    return false;
+  }
+
+  cv::Mat foreground =
+      (mask == cv::GC_FGD) | (mask == cv::GC_PR_FGD);
+  foreground.convertTo(foreground, CV_8UC1, 255.0);
+  cv::morphologyEx(foreground, foreground, cv::MORPH_CLOSE,
+                   cv::getStructuringElement(cv::MORPH_ELLIPSE,
+                                             cv::Size(3, 3)));
+  const cv::Point anchor(gauge.segmentation_positive_points.front().x,
+                         gauge.segmentation_positive_points.front().y);
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(foreground, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+  std::string inferencePath = "grabcut_point_prompt";
+  if (contours.empty()) {
+    // GrabCut can legitimately leave only the hard foreground core when the
+    // image has very little colour separation.  In that case retain the same
+    // point-only contract and build a connected seed region.  A candidate
+    // which reaches any Seg - point is rejected, so a negative prompt remains
+    // a hard exclusion rather than a decorative annotation.
+    cv::Mat fallbackRegion = cv::Mat::zeros(source.size(), CV_8UC1);
+    int bestPixels = 0;
+    const int tolerance = std::clamp(m_magicWandColorTolerance, 0, 255);
+    const int connectivity = m_magicWandEightConnected ? 8 : 4;
+    for (const ManualSegmentationPromptPoint &positive :
+         gauge.segmentation_positive_points) {
+      if (positive.x < 0 || positive.y < 0 || positive.x >= source.cols ||
+          positive.y >= source.rows)
+        continue;
+      cv::Mat work = source.clone();
+      cv::Mat floodMask = cv::Mat::zeros(source.rows + 2, source.cols + 2,
+                                         CV_8UC1);
+      const int flags = connectivity | cv::FLOODFILL_MASK_ONLY |
+                        cv::FLOODFILL_FIXED_RANGE | (255 << 8);
+      const int pixels = cv::floodFill(
+          work, floodMask, cv::Point(positive.x, positive.y), cv::Scalar(),
+          nullptr, cv::Scalar(tolerance, tolerance, tolerance),
+          cv::Scalar(tolerance, tolerance, tolerance), flags);
+      cv::Mat candidate =
+          floodMask(cv::Rect(1, 1, source.cols, source.rows)).clone();
+      bool reachesNegative = false;
+      for (const ManualSegmentationPromptPoint &negative :
+           gauge.segmentation_negative_points) {
+        if (negative.x >= 0 && negative.y >= 0 && negative.x < candidate.cols &&
+            negative.y < candidate.rows &&
+            candidate.at<unsigned char>(negative.y, negative.x) != 0) {
+          reachesNegative = true;
+          break;
+        }
+      }
+      if (!reachesNegative && pixels > bestPixels) {
+        fallbackRegion = std::move(candidate);
+        bestPixels = pixels;
+      }
+    }
+    if (bestPixels > 0) {
+      foreground = fallbackRegion;
+      cv::findContours(foreground, contours, cv::RETR_EXTERNAL,
+                       cv::CHAIN_APPROX_NONE);
+      inferencePath = "point_seeded_connected_region_fallback";
+    }
+  }
+  if (contours.empty()) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_EMPTY";
+    reason = "Seg +/- inference produced no valid contour: place Seg + inside the target and Seg - on the adjacent background";
+    return false;
+  }
+
+  const auto best = std::max_element(
+      contours.begin(), contours.end(), [&anchor](const std::vector<cv::Point> &left,
+                                                   const std::vector<cv::Point> &right) {
+        const bool leftContains = cv::pointPolygonTest(left, anchor, false) >= 0.0;
+        const bool rightContains = cv::pointPolygonTest(right, anchor, false) >= 0.0;
+        if (leftContains != rightContains)
+          return !leftContains;
+        return std::abs(cv::contourArea(left)) < std::abs(cv::contourArea(right));
+      });
+  std::string nodeReason;
+  if (!BuildMagicWandFormFitNodes(*best, nodeReason)) {
+    m_magicWandStatus = "PROMPT_BOUNDARY_NODEIZATION_FAILED";
+    reason = nodeReason;
+    return false;
+  }
+
+  m_magicWandSeed = {static_cast<float>(anchor.x), static_cast<float>(anchor.y)};
+  const cv::Point boundaryAnchor = SelectBoundaryAnchor(
+      *best, anchor, source.size(), m_boundaryAnchorMode);
+  m_boundaryAnchor = {static_cast<float>(boundaryAnchor.x),
+                      static_cast<float>(boundaryAnchor.y)};
+  m_magicWandRegionPixels = cv::countNonZero(foreground);
+  m_magicWandStatus = "PROMPT_BOUNDARY_PREVIEW_READY";
+  reason = "local Prompt Boundary preview: path=" + inferencePath +
+           ", foreground_points=" +
+           std::to_string(gauge.segmentation_positive_points.size()) +
+           ", background_points=" +
+           std::to_string(gauge.segmentation_negative_points.size()) +
+           ", " + nodeReason + ", boundary_anchor=" +
+           std::string(BoundaryAnchorModeKey(m_boundaryAnchorMode)) + "(" +
+           std::to_string(boundaryAnchor.x) + "," +
+           std::to_string(boundaryAnchor.y) + ")";
+  return true;
+}
+
+bool ViewController::CommitSegmentationPromptBoundary(CxImagePointerResult &out) {
+  const AnnotationToolDefinition *tool = m_annotationLayer.ActiveTool();
+  if (tool == nullptr || tool->action != "auto_segmentation") {
+    out.status = "failed";
+    out.reason = "Prompt Boundary is not the active annotation tool";
+    return false;
+  }
+  if (m_magicWandStatus != "PROMPT_BOUNDARY_PREVIEW_READY" ||
+      m_magicWandPreviewPoints.size() < 3) {
+    out.status = "failed";
+    out.reason = "no Prompt Boundary preview is ready to accept";
+    return false;
+  }
+
+  auto shape = std::make_unique<PolylineShape>();
+  for (const CxShapePoint &point : m_magicWandPreviewPoints)
+    shape->addPoint(point.x, point.y);
+  shape->close(true);
+  CxShapeElement &element =
+      m_annotationLayer.CreateFromTool(*tool, std::move(shape));
+  m_annotationLayer.SelectShape(
+      static_cast<int>(m_annotationLayer.ShapeElements().size()) - 1);
+  out.consumed = true;
+  out.phase = "prompt_boundary_accept";
+  out.status = "created";
+  out.created_ref = element.stable_ref;
+  out.reason = "Prompt Boundary accepted as editable closed polyline";
+
+  std::ostringstream trace;
+  trace << "ref=" << out.created_ref << " seed=(" << m_magicWandSeed.x
+        << "," << m_magicWandSeed.y << ") boundary_anchor="
+        << BoundaryAnchorModeKey(m_boundaryAnchorMode) << "("
+        << m_boundaryAnchor.x << "," << m_boundaryAnchor.y
+        << ") foreground_points="
+        << m_manualTest.current_gauge.segmentation_positive_points.size()
+        << " background_points="
+        << m_manualTest.current_gauge.segmentation_negative_points.size()
+        << " grabcut_iterations=" << m_promptBoundaryGrabCutIterations
+        << " raw_boundary_points=" << m_magicWandRawBoundaryPointCount
+        << " node_count=" << m_magicWandFormFitNodeCount;
+  RecordManualOperationTraceEvent(m_manualTest, "prompt_boundary_accept",
+                                  "created", trace.str());
+  std::string receiptPath;
+  std::string receiptReason;
+  if (!WriteBusinessAnnotationReceipt(element, *tool, "accept_boundary",
+                                      "accepted", trace.str(), receiptPath,
+                                      receiptReason)) {
+    out.reason += "; local receipt unavailable: " + receiptReason;
+  } else {
+    out.reason += "; local receipt=" + receiptPath;
+  }
+  ClearMagicWandPreview("PROMPT_BOUNDARY_ACCEPTED");
+  return true;
+}
+
+bool ViewController::BuildOpenBoundaryFormFit(
+    const std::vector<CxShapePoint> &points, std::string &reason) {
+  m_openBoundaryRawPoints = points;
+  m_openBoundaryPreviewPoints.clear();
+  m_openBoundaryStatus = "OPEN_BOUNDARY_FIT_RUNNING";
+  if (points.size() < 2) {
+    m_openBoundaryStatus = "OPEN_BOUNDARY_NEEDS_TWO_POINTS";
+    reason = "place at least two ordered points on the physical boundary";
+    return false;
+  }
+  std::vector<cv::Point2f> input;
+  input.reserve(points.size());
+  for (const CxShapePoint &point : points)
+    input.emplace_back(static_cast<float>(point.x), static_cast<float>(point.y));
+
+  cv::Vec4f line;
+  cv::fitLine(input, line, cv::DIST_L2, 0.0, 0.01, 0.01);
+  double lineSquared = 0.0;
+  for (const cv::Point2f &point : input) {
+    const double dx = point.x - line[2], dy = point.y - line[3];
+    const double distance = std::abs(dx * line[1] - dy * line[0]);
+    lineSquared += distance * distance;
+  }
+  m_openBoundaryLineResidualPx =
+      std::sqrt(lineSquared / static_cast<double>(input.size()));
+
+  cv::Point2f center;
+  float radius = 0.0f;
+  cv::minEnclosingCircle(input, center, radius);
+  double arcSquared = 0.0;
+  for (const cv::Point2f &point : input) {
+    const double radial = cv::norm(point - center);
+    const double distance = radial - radius;
+    arcSquared += distance * distance;
+  }
+  m_openBoundaryArcResidualPx =
+      std::sqrt(arcSquared / static_cast<double>(input.size()));
+
+  if (m_openBoundaryLineResidualPx <= 1.5) {
+    m_openBoundaryType = "line";
+    m_openBoundaryFitResidualPx = m_openBoundaryLineResidualPx;
+    m_openBoundaryPreviewPoints = {points.front(), points.back()};
+  } else if (input.size() >= 3 && radius > 4.0f &&
+             m_openBoundaryArcResidualPx < m_openBoundaryLineResidualPx * 0.8 &&
+             m_openBoundaryArcResidualPx <= 3.0) {
+    m_openBoundaryType = "arc";
+    m_openBoundaryFitResidualPx = m_openBoundaryArcResidualPx;
+    m_openBoundaryPreviewPoints = points;
+  } else {
+    m_openBoundaryType = "open_curve";
+    m_openBoundaryFitResidualPx = m_openBoundaryLineResidualPx;
+    std::vector<cv::Point> discrete;
+    discrete.reserve(points.size());
+    for (const CxShapePoint &point : points)
+      discrete.emplace_back(static_cast<int>(std::lround(point.x)),
+                            static_cast<int>(std::lround(point.y)));
+    std::vector<cv::Point> simplified;
+    cv::approxPolyDP(discrete, simplified,
+                     std::max(0.5f, m_magicWandSimplifyPixels), false);
+    for (const cv::Point &point : simplified)
+      m_openBoundaryPreviewPoints.push_back(
+          {static_cast<double>(point.x), static_cast<double>(point.y)});
+    if (m_openBoundaryPreviewPoints.size() < 2)
+      m_openBoundaryPreviewPoints = points;
+  }
+  m_openBoundaryStatus = "OPEN_BOUNDARY_FORMFIT_READY";
+  reason = "boundary FormFit candidate=" + m_openBoundaryType +
+           " line_rms_px=" + std::to_string(m_openBoundaryLineResidualPx) +
+           " arc_rms_px=" + std::to_string(m_openBoundaryArcResidualPx) +
+           " nodes=" + std::to_string(m_openBoundaryPreviewPoints.size());
+  return true;
+}
+
+bool ViewController::CommitOpenBoundaryFormFit(CxImagePointerResult &out) {
+  const AnnotationToolDefinition *tool = m_annotationLayer.ActiveTool();
+  if (tool == nullptr || tool->action != "open_boundary_formfit" ||
+      m_openBoundaryStatus != "OPEN_BOUNDARY_FORMFIT_READY" ||
+      m_openBoundaryPreviewPoints.size() < 2) {
+    out.status = "failed";
+    out.reason = "no open Boundary Trace FormFit candidate is ready";
+    return false;
+  }
+  auto shape = std::make_unique<PolylineShape>();
+  for (const CxShapePoint &point : m_openBoundaryPreviewPoints)
+    shape->addPoint(point.x, point.y);
+  shape->close(false);
+  CxShapeElement &element = m_annotationLayer.CreateFromTool(*tool, std::move(shape));
+  m_annotationLayer.SelectShape(static_cast<int>(m_annotationLayer.ShapeElements().size()) - 1);
+  out.consumed = true;
+  out.phase = "open_boundary_formfit_accept";
+  out.status = "created";
+  out.created_ref = element.stable_ref;
+  std::ostringstream trace;
+  trace << "ref=" << out.created_ref << " boundary_role=physical_interface"
+        << " candidate=" << m_openBoundaryType
+        << " fit_rms_px=" << m_openBoundaryFitResidualPx
+        << " input_points=" << m_openBoundaryRawPoints.size();
+  std::string receiptPath, receiptReason;
+  WriteBusinessAnnotationReceipt(element, *tool, "accept_boundary", "accepted",
+                                 trace.str(), receiptPath, receiptReason);
+  out.reason = "open physical boundary accepted as " + m_openBoundaryType;
+  if (!receiptPath.empty()) out.reason += "; local receipt=" + receiptPath;
+  m_openBoundaryStatus = "OPEN_BOUNDARY_ACCEPTED";
+  m_openBoundaryRawPoints.clear();
+  m_openBoundaryPreviewPoints.clear();
   return true;
 }
 
@@ -2028,6 +2446,19 @@ bool ViewController::CommitMagicWandPreview(CxImagePointerResult &out) {
                                   "created", trace.str());
   CXLOG_INFO("ImageAnnotationUI", "magic_wand_boundary_accept", "created",
              trace.str());
+  std::string receiptPath;
+  std::string receiptReason;
+  if (!WriteBusinessAnnotationReceipt(element, *tool, "accept_boundary",
+                                      "accepted", trace.str(), receiptPath,
+                                      receiptReason)) {
+    out.reason += "; local receipt unavailable: " + receiptReason;
+    CXLOG_ERROR("ImageAnnotationUI", "business_annotation_receipt", "failed",
+                receiptReason);
+  } else {
+    out.reason += "; local receipt=" + receiptPath;
+    CXLOG_INFO("ImageAnnotationUI", "business_annotation_receipt", "written",
+               receiptPath);
+  }
   ClearMagicWandPreview("MAGIC_WAND_ACCEPTED");
   return true;
 }
@@ -2087,6 +2518,18 @@ bool ViewController::CommitDraftShapeFromTool(
   out.status = "created";
   out.created_ref = element.stable_ref;
   out.reason = "shape created from annotation tool";
+  std::string receiptPath;
+  std::string receiptReason;
+  const std::string trace = "annotation_shape_created ref=" + out.created_ref +
+                            " tool=" + tool.name;
+  if (WriteBusinessAnnotationReceipt(element, tool, "create_shape", "accepted",
+                                     trace, receiptPath, receiptReason)) {
+    out.reason += "; local receipt=" + receiptPath;
+  } else {
+    out.reason += "; local receipt unavailable: " + receiptReason;
+    CXLOG_ERROR("ImageAnnotationUI", "business_annotation_receipt", "failed",
+                receiptReason);
+  }
   CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created",
              "ref=" + out.created_ref);
   return true;
@@ -2368,6 +2811,9 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
       if (ok) {
         std::ostringstream trace;
         trace << "seed=(" << m_magicWandSeed.x << "," << m_magicWandSeed.y
+              << ") boundary_anchor="
+              << BoundaryAnchorModeKey(m_boundaryAnchorMode) << "("
+              << m_boundaryAnchor.x << "," << m_boundaryAnchor.y
               << ") algorithm="
               << (m_magicWandAlgorithm == 0 ? "color_fixed_range_v1"
                                             : "color_connected_range_v1")
@@ -2413,6 +2859,20 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
           out.status = "created";
           out.created_ref = element.stable_ref;
           out.reason = "point created";
+          std::string receiptPath;
+          std::string receiptReason;
+          const std::string trace =
+              "annotation_point_created ref=" + out.created_ref +
+              " tool=" + tool->name;
+          if (WriteBusinessAnnotationReceipt(element, *tool, "create_shape",
+                                             "accepted", trace, receiptPath,
+                                             receiptReason)) {
+            out.reason += "; local receipt=" + receiptPath;
+          } else {
+            out.reason += "; local receipt unavailable: " + receiptReason;
+            CXLOG_ERROR("ImageAnnotationUI", "business_annotation_receipt",
+                        "failed", receiptReason);
+          }
           std::string exportReason;
           if (ExportShapeElementToRuntimeGlobals(m_manualTest, element,
                                                  exportReason)) {
@@ -2444,6 +2904,27 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
         m_lastPointerResult = out;
         return out;
       }
+    }
+  } else if (activeTool->action == "open_boundary_formfit") {
+    if (frame.left_clicked) {
+      m_activePolylinePoints.push_back({frame.image_x, frame.image_y});
+      out.consumed = true;
+      out.phase = "open_boundary_trace";
+      out.status = "point_added";
+      out.reason = "boundary trace point added; press Enter to fit";
+      m_lastPointerResult = out;
+      return out;
+    }
+    if (frame.enter_pressed) {
+      std::string fitReason;
+      const bool ok = BuildOpenBoundaryFormFit(m_activePolylinePoints, fitReason);
+      out.consumed = true;
+      out.phase = "open_boundary_formfit";
+      out.status = ok ? "preview_ready" : "failed";
+      out.reason = fitReason;
+      m_activePolylinePoints.clear();
+      m_lastPointerResult = out;
+      return out;
     }
   } else if (currentKind == OverlayKind::Polyline) {
     if (frame.left_clicked) {
@@ -2487,6 +2968,20 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
           out.created_ref = element.stable_ref;
           out.reason = frame.right_clicked ? "polyline closed by right click"
                                            : "polyline created";
+          std::string receiptPath;
+          std::string receiptReason;
+          const std::string trace =
+              "annotation_polyline_created ref=" + out.created_ref +
+              " tool=" + tool->name;
+          if (WriteBusinessAnnotationReceipt(element, *tool, "create_shape",
+                                             "accepted", trace, receiptPath,
+                                             receiptReason)) {
+            out.reason += "; local receipt=" + receiptPath;
+          } else {
+            out.reason += "; local receipt unavailable: " + receiptReason;
+            CXLOG_ERROR("ImageAnnotationUI", "business_annotation_receipt",
+                        "failed", receiptReason);
+          }
           CXLOG_INFO("ImageAnnotationUI", "annotation_shape_created", "created",
                      "ref=" + out.created_ref);
           m_activePolylinePoints.clear();
@@ -2587,45 +3082,13 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
       return out;
     }
   } else if (currentKind == OverlayKind::AutoBoundaryRequest) {
-    if (!m_annotationDragging) {
-      if (frame.left_clicked) {
-        m_annotationDragging = true;
-        m_annotationDragKind = OverlayKind::AutoBoundaryRequest;
-        m_annotationDragStart = {(float)frame.image_x, (float)frame.image_y};
-        m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
-        out.consumed = true;
-        out.phase = "create_shape";
-        out.status = "draft_started";
-        out.reason = "auto boundary prompt draft started";
-        m_lastPointerResult = out;
-        return out;
-      }
-      m_lastPointerResult = out;
-      return out;
-    }
-
-    if (frame.left_down) {
-      m_annotationDragEnd = {(float)frame.image_x, (float)frame.image_y};
-      out.consumed = true;
-      out.phase = "create_shape";
-      out.status = "draft_updating";
-      out.reason = "auto boundary prompt draft updating";
-      m_lastPointerResult = out;
-      return out;
-    }
-
-    if (frame.left_released) {
-      const AnnotationToolDefinition *tool = activeTool;
-      if (tool) {
-        CommitDraftShapeFromTool(*tool, out);
-      } else {
-        out.status = "failed";
-        out.reason = "active tool definition unavailable";
-      }
-      m_annotationDragging = false;
-      m_lastPointerResult = out;
-      return out;
-    }
+    out.consumed = frame.left_clicked || frame.left_down || frame.left_released;
+    out.phase = "auto_boundary_point_prompt_only";
+    out.status = "point_prompts_required";
+    out.reason = "Auto Boundary does not draw a prompt rectangle; add Seg + / Seg - points and run point-prompt boundary inference";
+    m_annotationDragging = false;
+    m_lastPointerResult = out;
+    return out;
   } else if (currentKind == OverlayKind::Circle) {
     if (!m_annotationDragging) {
       if (frame.left_clicked) {
@@ -2856,15 +3319,51 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     const ImVec2 seed = ImageToScreen(m_magicWandSeed.x, m_magicWandSeed.y);
     drawList->AddCircleFilled(seed, 4.5f, previewColor);
     drawList->AddCircle(seed, 7.0f, IM_COL32(255, 255, 255, 240), 16, 1.5f);
-    drawList->AddText(ImVec2(seed.x + 8.0f, seed.y - 16.0f), previewColor,
-                      "Magic Wand FormFit nodes - accept in Annotation Tools");
+    const ImVec2 anchor =
+        ImageToScreen(m_boundaryAnchor.x, m_boundaryAnchor.y);
+    drawList->AddCircleFilled(anchor, 4.5f, IM_COL32(255, 170, 60, 245));
+    drawList->AddCircle(anchor, 7.0f, IM_COL32(255, 255, 255, 240), 16, 1.5f);
+    const bool promptBoundary =
+        m_magicWandStatus.rfind("PROMPT_BOUNDARY", 0) == 0;
+    drawList->AddText(
+        ImVec2(seed.x + 8.0f, seed.y - 16.0f), previewColor,
+        promptBoundary ? "Prompt Boundary FormFit nodes - accept in Annotation Tools"
+                       : "Magic Wand nodes - accept in Annotation Tools");
+    drawList->AddText(ImVec2(anchor.x + 8.0f, anchor.y + 5.0f),
+                      IM_COL32(255, 190, 90, 245),
+                      BoundaryAnchorModeKey(m_boundaryAnchorMode));
   }
 
+  if (m_openBoundaryPreviewPoints.size() >= 2) {
+    std::vector<ImVec2> screenPoints;
+    screenPoints.reserve(m_openBoundaryPreviewPoints.size());
+    for (const CxShapePoint &point : m_openBoundaryPreviewPoints)
+      screenPoints.push_back(ImageToScreen(static_cast<float>(point.x),
+                                           static_cast<float>(point.y)));
+    const ImU32 color = IM_COL32(255, 166, 68, 245);
+    drawList->AddPolyline(screenPoints.data(), static_cast<int>(screenPoints.size()),
+                          color, ImDrawFlags_None, 2.5f);
+    for (const ImVec2 &point : screenPoints)
+      drawList->AddCircleFilled(point, 3.5f, IM_COL32(255, 232, 110, 245));
+    drawList->AddText(ImVec2(screenPoints.front().x + 8.0f,
+                              screenPoints.front().y - 16.0f), color,
+                      ("Boundary FormFit: " + m_openBoundaryType).c_str());
+  }
+
+  const AnnotationToolDefinition *activeAnnotationTool =
+      m_annotationLayer.ActiveTool();
+  const bool autoBoundaryPointPromptOnly =
+      activeAnnotationTool != nullptr &&
+      activeAnnotationTool->action == "auto_segmentation";
   for (int elementIndex = 0;
        elementIndex < static_cast<int>(m_annotationLayer.Elements().size());
        ++elementIndex) {
     OverlayElement &element = m_annotationLayer.Elements()[elementIndex];
     if (!element.visible || element.image_points.empty())
+      continue;
+    if (autoBoundaryPointPromptOnly &&
+        (element.kind == OverlayKind::AutoBoundaryRequest ||
+         element.semantic_role == "prompt_rect"))
       continue;
     const ImU32 color = element.selected ? IM_COL32(255, 220, 40, 255)
                                          : IM_COL32(255, 80, 180, 255);
@@ -2917,7 +3416,7 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
       drawList->AddCircleFilled(p, 6.0f, IM_COL32(255, 160, 40, 255));
       drawList->AddCircle(p, 9.0f, IM_COL32(255, 255, 255, 255), 24, 2.0f);
       drawList->AddText(ImVec2(p.x + 10.0f, p.y - 8.0f),
-                        IM_COL32(255, 220, 80, 255), "EdgeSam");
+                        IM_COL32(255, 220, 80, 255), "Prompt box");
     } else if (element.kind == OverlayKind::BoundaryPolyline) {
       for (std::size_t i = 1; i < element.image_points.size(); ++i) {
         const ImVec2 first = ImageToScreen(element.image_points[i - 1].x,
@@ -3061,6 +3560,15 @@ void ViewController::drawImageEvidencePanels() {
     const std::string label = tool.label.empty() ? tool.name : tool.label;
     if (ImGui::Button(label.c_str(), ImVec2(-1.0f, 28.0f))) {
       if (active) {
+        if (tool.action == "auto_segmentation") {
+          std::string previewReason;
+          const bool previewReady =
+              BuildSegmentationPromptBoundaryPreview(previewReason);
+          m_annotationStatus = previewReady
+              ? "Prompt Boundary preview ready: " + previewReason
+              : "Prompt Boundary not run: " + previewReason;
+          return;
+        }
         m_imageToolEnabled = false;
         m_imageToolMode = ImageToolMode::PointerPan;
         CancelAnnotationCreate();
@@ -3070,12 +3578,21 @@ void ViewController::drawImageEvidencePanels() {
         m_imageToolEnabled = true;
         m_imageToolMode = ToolModeFromAnnotationTool(tool);
         CancelAnnotationCreate();
-        if (tool.action != "magic_wand_boundary")
+        if (tool.action != "magic_wand_boundary" &&
+            tool.action != "auto_segmentation")
           ClearMagicWandPreview("MAGIC_WAND_IDLE");
         m_annotationLayer.SetActiveToolIndex(toolIndex);
         m_annotationStatus = "enabled tool_id=" + tool.name +
                              " shape=" + tool.shape_type +
                              " role=" + tool.role + " action=" + tool.action;
+        if (tool.action == "auto_segmentation") {
+          std::string previewReason;
+          const bool previewReady =
+              BuildSegmentationPromptBoundaryPreview(previewReason);
+          m_annotationStatus = previewReady
+              ? "Prompt Boundary preview ready: " + previewReason
+              : "Prompt Boundary not run: " + previewReason;
+        }
       }
     }
 
@@ -3112,6 +3629,7 @@ void ViewController::drawImageEvidencePanels() {
       m_magicWandNodeizationMode = 0;
       m_magicWandMaximumNodes = 64;
       m_magicWandMinimumNodeSpacingPixels = 4.0f;
+      m_boundaryAnchorMode = 0;
       ClearMagicWandPreview("MAGIC_WAND_DEFAULTS_RESTORED");
       m_annotationStatus = "Magic Wand default profile restored";
       RecordManualOperationTraceEvent(
@@ -3119,7 +3637,8 @@ void ViewController::drawImageEvidencePanels() {
           "profile=magic_wand_default_v1 algorithm=color_fixed_range_v1 "
           "tolerance=24 connectivity=8 formfit_residual_px=1.5 "
           "formfit_mode=closed_polygon_formfit_v1 max_nodes=64 "
-          "minimum_node_spacing_px=4 minimum_region_pixels=32");
+          "minimum_node_spacing_px=4 minimum_region_pixels=32 "
+          "boundary_anchor_mode=custom");
     }
     bool parametersChanged = false;
     const char *algorithmOptions[] = {
@@ -3128,6 +3647,12 @@ void ViewController::drawImageEvidencePanels() {
                                       algorithmOptions, IM_ARRAYSIZE(algorithmOptions));
     parametersChanged |= ImGui::SliderInt("Color tolerance", &m_magicWandColorTolerance, 0, 128);
     parametersChanged |= ImGui::Checkbox("8-connected region", &m_magicWandEightConnected);
+    ImGui::SeparatorText("Boundary keypoint selection");
+    parametersChanged |= ImGui::Combo(
+        "Boundary anchor mode", &m_boundaryAnchorMode,
+        BoundaryAnchorModeLabels(), 9);
+    ImGui::TextDisabled(
+        "Custom keeps the click seed. Other modes select a reproducible point on the extracted contour.");
     ImGui::SeparatorText("FormFit geometry nodes");
     const char *nodeizationOptions[] = {
         "Closed polygon FormFit (default)", "Raw contour nodes (debug)"};
@@ -3185,6 +3710,103 @@ void ViewController::drawImageEvidencePanels() {
           "edge_assisted_snap_v1 — PLANNED. It is intentionally not selectable until edge evidence, parameter contract and regression case exist.");
       ImGui::TextDisabled(
           "This is classical local CV, not a remote model. No image or pixel leaves this workstation.");
+    }
+  }
+
+  if (magicTool != nullptr && magicTool->action == "auto_segmentation") {
+    ImGui::Separator();
+    ImGui::TextUnformatted("Auto Boundary — Seg +/- point boundary inference");
+    ImGui::TextDisabled(
+        "1. Add Seg + foreground points. 2. Add Seg - background points as needed. 3. Run inference; the result is a boundary preview.");
+    ImGui::TextDisabled(
+        "No prompt rectangle is drawn or consumed by Auto Boundary. The only input is Seg +/- points; the only visual result is the inferred boundary.");
+    ImGui::Text("Canvas prompts: Seg + = %d | Seg - = %d",
+                static_cast<int>(m_manualTest.current_gauge.segmentation_positive_points.size()),
+                static_cast<int>(m_manualTest.current_gauge.segmentation_negative_points.size()));
+    if (ImGui::Button("Run Seg +/- Boundary Inference", ImVec2(-1.0f, 28.0f))) {
+      std::string previewReason;
+      const bool previewReady = BuildSegmentationPromptBoundaryPreview(previewReason);
+      m_annotationStatus = previewReady
+          ? "Seg +/- boundary preview ready: " + previewReason
+          : "Seg +/- boundary inference not run: " + previewReason;
+    }
+    bool parametersChanged = false;
+    parametersChanged |= ImGui::SliderInt("Local refinement iterations",
+                                          &m_promptBoundaryGrabCutIterations,
+                                          1, 10);
+    ImGui::SeparatorText("Boundary keypoint selection");
+    parametersChanged |= ImGui::Combo(
+        "Boundary anchor mode", &m_boundaryAnchorMode,
+        BoundaryAnchorModeLabels(), 9);
+    ImGui::TextDisabled(
+        "Seg +/- points drive inference; this mode chooses the recorded contour keypoint after extraction.");
+    ImGui::SeparatorText("Boundary geometry nodes");
+    parametersChanged |= ImGui::SliderFloat("Node residual (px)",
+                                             &m_magicWandSimplifyPixels,
+                                             0.0f, 12.0f, "%.1f");
+    parametersChanged |= ImGui::SliderInt("Maximum geometry nodes",
+                                           &m_magicWandMaximumNodes, 3, 256);
+    parametersChanged |= ImGui::SliderFloat("Minimum node spacing (px)",
+                                             &m_magicWandMinimumNodeSpacingPixels,
+                                             0.0f, 32.0f, "%.1f");
+    if (parametersChanged && !m_magicWandPreviewPoints.empty()) {
+      ClearMagicWandPreview("PROMPT_BOUNDARY_PREVIEW_STALE_PARAMETERS_CHANGED");
+      m_annotationStatus = "Prompt Boundary preview discarded because parameters changed";
+    }
+    ImGui::Text("Status: %s", m_magicWandStatus.c_str());
+    ImGui::Text("Preview: raw boundary=%d | geometry nodes=%d | region pixels=%d",
+                m_magicWandRawBoundaryPointCount, m_magicWandFormFitNodeCount,
+                m_magicWandRegionPixels);
+    const bool canAcceptPrompt =
+        m_magicWandStatus == "PROMPT_BOUNDARY_PREVIEW_READY" &&
+        m_magicWandPreviewPoints.size() >= 3;
+    if (!canAcceptPrompt)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Accept Boundary", ImVec2(-1.0f, 28.0f))) {
+      CxImagePointerResult acceptResult;
+      if (CommitSegmentationPromptBoundary(acceptResult)) {
+        m_annotationStatus = acceptResult.status + ": " + acceptResult.reason;
+        m_lastPointerResult = acceptResult;
+      } else {
+        m_annotationStatus = "failed: " + acceptResult.reason;
+      }
+    }
+    if (!canAcceptPrompt)
+      ImGui::EndDisabled();
+    if (ImGui::Button("Discard Preview", ImVec2(-1.0f, 28.0f))) {
+      ClearMagicWandPreview("PROMPT_BOUNDARY_DISCARDED");
+      m_annotationStatus = "Prompt Boundary preview discarded";
+    }
+    ImGui::TextDisabled(
+        "Runs local point-prompt segmentation inference. A dedicated Torch prompt-segmentation provider may replace this backend without changing the point-only UI contract.");
+  }
+
+  if (magicTool != nullptr && magicTool->action == "open_boundary_formfit") {
+    ImGui::Separator();
+    ImGui::TextUnformatted("Boundary Trace FormFit — physical interface boundary");
+    ImGui::TextDisabled(
+        "Click ordered points on the real material/region/part boundary, then press Enter.");
+    ImGui::TextDisabled(
+        "This is not a line-like object label and does not create a closed mask.");
+    ImGui::Text("Status: %s", m_openBoundaryStatus.c_str());
+    ImGui::Text("Candidate: %s | line RMS=%.2f px | arc RMS=%.2f px",
+                m_openBoundaryType.c_str(), m_openBoundaryLineResidualPx,
+                m_openBoundaryArcResidualPx);
+    const bool ready = m_openBoundaryStatus == "OPEN_BOUNDARY_FORMFIT_READY";
+    if (!ready) ImGui::BeginDisabled();
+    if (ImGui::Button("Accept Open Boundary", ImVec2(-1.0f, 28.0f))) {
+      CxImagePointerResult acceptResult;
+      if (CommitOpenBoundaryFormFit(acceptResult)) {
+        m_annotationStatus = acceptResult.status + ": " + acceptResult.reason;
+        m_lastPointerResult = acceptResult;
+      } else m_annotationStatus = "failed: " + acceptResult.reason;
+    }
+    if (!ready) ImGui::EndDisabled();
+    if (ImGui::Button("Discard Boundary Preview", ImVec2(-1.0f, 28.0f))) {
+      m_openBoundaryPreviewPoints.clear();
+      m_openBoundaryRawPoints.clear();
+      m_openBoundaryStatus = "OPEN_BOUNDARY_DISCARDED";
+      m_annotationStatus = "Boundary Trace FormFit preview discarded";
     }
   }
 

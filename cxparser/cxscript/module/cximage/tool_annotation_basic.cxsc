@@ -9,7 +9,7 @@ CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
 CxAnnotationTool_add("findsegmentation_positive_prompt");
-CxAnnotationTool_setlabel("Seg + Point");
+CxAnnotationTool_setlabel("Seg + Point (foreground)");
 CxAnnotationTool_setshape("PointsShape");
 CxAnnotationTool_setrole("prompt_positive");
 CxAnnotationTool_setinteraction("click_to_create");
@@ -19,7 +19,7 @@ CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
 CxAnnotationTool_add("findsegmentation_negative_prompt");
-CxAnnotationTool_setlabel("Seg - Point");
+CxAnnotationTool_setlabel("Seg - Point (background)");
 CxAnnotationTool_setshape("PointsShape");
 CxAnnotationTool_setrole("prompt_negative");
 CxAnnotationTool_setinteraction("click_to_create");
@@ -47,9 +47,9 @@ CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
 CxAnnotationTool_add("auto_boundary_edgesam");
-CxAnnotationTool_setlabel("Auto Boundary / EdgeSam");
+CxAnnotationTool_setlabel("Auto Boundary");
 CxAnnotationTool_setshape("AutoBoundary");
-CxAnnotationTool_setrole("auto_boundary_request");
+CxAnnotationTool_setrole("segmentation_point_prompt_inference");
 CxAnnotationTool_setinteraction("auto_segmentation");
 CxAnnotationTool_setownertool("FindSegmentation");
 CxAnnotationTool_setownerbinding("setpromptrectxyxy");
@@ -85,6 +85,14 @@ CxAnnotationTool_setlabel("Polyline");
 CxAnnotationTool_setshape("PolylineShape");
 CxAnnotationTool_setrole("boundary");
 CxAnnotationTool_setinteraction("multi_click");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
+CxAnnotationTool_add("open_boundary_trace");
+CxAnnotationTool_setlabel("Boundary Trace FormFit");
+CxAnnotationTool_setshape("PolylineShape");
+CxAnnotationTool_setrole("open_interface_boundary");
+CxAnnotationTool_setinteraction("open_boundary_formfit");
 CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 

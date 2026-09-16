@@ -2071,25 +2071,47 @@ void ViewController::drawKeyParameterControlsWindow() {
   const bool magicWandActive = activeAnnotationTool != nullptr &&
                                activeAnnotationTool->action ==
                                    "magic_wand_boundary";
-  if (magicWandActive) {
-    ImGui::TextUnformatted("Magic Wand Boundary — Key Parameter Controls");
+  const bool promptBoundaryActive = activeAnnotationTool != nullptr &&
+                                    activeAnnotationTool->action ==
+                                        "auto_segmentation";
+  if (magicWandActive || promptBoundaryActive) {
+    ImGui::TextUnformatted(magicWandActive
+                               ? "Magic Wand Boundary — Key Parameter Controls"
+                               : "Auto Boundary — Key Parameter Controls");
     ImGui::TextDisabled(
-        "Default flow: local region boundary → FormFit geometry nodes → editable closed polygon.");
-    ImGui::SeparatorText("Boundary extraction");
+        "Segmentation/region extraction and contour keypoint selection are separately recorded in the local receipt.");
     bool parametersChanged = false;
-    const char *algorithmOptions[] = {
-        "Color fixed range (default)", "Connected color range"};
-    parametersChanged |= ImGui::Combo("Algorithm##key_magic_wand",
-                                      &m_magicWandAlgorithm, algorithmOptions,
-                                      IM_ARRAYSIZE(algorithmOptions));
-    parametersChanged |= ImGui::SliderInt("Color tolerance##key_magic_wand",
-                                          &m_magicWandColorTolerance, 0, 128);
-    parametersChanged |= ImGui::Checkbox("8-connected region##key_magic_wand",
-                                         &m_magicWandEightConnected);
-    parametersChanged |= ImGui::InputInt("Minimum region pixels##key_magic_wand",
-                                         &m_magicWandMinimumRegionPixels);
-    m_magicWandMinimumRegionPixels =
-        std::clamp(m_magicWandMinimumRegionPixels, 3, 1000000);
+    if (magicWandActive) {
+      ImGui::SeparatorText("Boundary extraction");
+      const char *algorithmOptions[] = {
+          "Color fixed range (default)", "Connected color range"};
+      parametersChanged |= ImGui::Combo("Algorithm##key_magic_wand",
+                                        &m_magicWandAlgorithm, algorithmOptions,
+                                        IM_ARRAYSIZE(algorithmOptions));
+      parametersChanged |= ImGui::SliderInt("Color tolerance##key_magic_wand",
+                                            &m_magicWandColorTolerance, 0, 128);
+      parametersChanged |= ImGui::Checkbox("8-connected region##key_magic_wand",
+                                           &m_magicWandEightConnected);
+      parametersChanged |= ImGui::InputInt("Minimum region pixels##key_magic_wand",
+                                           &m_magicWandMinimumRegionPixels);
+      m_magicWandMinimumRegionPixels =
+          std::clamp(m_magicWandMinimumRegionPixels, 3, 1000000);
+    } else {
+      ImGui::SeparatorText("Prompt segmentation");
+      parametersChanged |= ImGui::SliderInt("Local refinement iterations##key_auto_boundary",
+                                            &m_promptBoundaryGrabCutIterations, 1, 10);
+    }
+
+    ImGui::SeparatorText("Business boundary keypoint");
+    const char *anchorOptions[] = {
+        "Custom (manual seed / first Seg +)", "Center nearest (nearest contour point)",
+        "Contour midpoint (half perimeter)", "X nearest (nearest image mid-height)",
+        "Y nearest (nearest image mid-width)", "X- (leftmost contour point)",
+        "X+ (rightmost contour point)", "Y+ (topmost contour point)",
+        "Y- (bottommost contour point)"};
+    parametersChanged |= ImGui::Combo("Boundary anchor mode##key_boundary_anchor",
+                                      &m_boundaryAnchorMode, anchorOptions,
+                                      IM_ARRAYSIZE(anchorOptions));
 
     ImGui::SeparatorText("FormFit key-node extraction");
     const char *nodeizationOptions[] = {
@@ -2114,12 +2136,13 @@ void ViewController::drawKeyParameterControlsWindow() {
         "Blue trace = raw local contour; green/yellow vertices = FormFit nodes. "
         "Raw contour mode is diagnostic only.");
     if (parametersChanged && !m_magicWandPreviewPoints.empty()) {
-      ClearMagicWandPreview("MAGIC_WAND_PREVIEW_STALE_PARAMETERS_CHANGED");
-      m_annotationStatus =
-          "Magic Wand preview discarded because a Key Parameter changed";
+      ClearMagicWandPreview(magicWandActive
+                                 ? "MAGIC_WAND_PREVIEW_STALE_PARAMETERS_CHANGED"
+                                 : "PROMPT_BOUNDARY_PREVIEW_STALE_PARAMETERS_CHANGED");
+      m_annotationStatus = "Boundary preview discarded because a Key Parameter changed";
     }
-    if (ImGui::Button("Restore Magic Wand Defaults##key_magic_wand",
-                      ImVec2(-1.0f, 28.0f))) {
+    if (magicWandActive && ImGui::Button("Restore Magic Wand Defaults##key_magic_wand",
+                                         ImVec2(-1.0f, 28.0f))) {
       m_magicWandAlgorithm = 0;
       m_magicWandColorTolerance = 24;
       m_magicWandEightConnected = true;
@@ -2128,6 +2151,7 @@ void ViewController::drawKeyParameterControlsWindow() {
       m_magicWandNodeizationMode = 0;
       m_magicWandMaximumNodes = 64;
       m_magicWandMinimumNodeSpacingPixels = 4.0f;
+      m_boundaryAnchorMode = 0;
       ClearMagicWandPreview("MAGIC_WAND_DEFAULTS_RESTORED");
       m_annotationStatus = "Magic Wand default profile restored";
       RecordManualOperationTraceEvent(
@@ -2135,7 +2159,7 @@ void ViewController::drawKeyParameterControlsWindow() {
           "profile=magic_wand_default_v1 algorithm=color_fixed_range_v1 "
           "tolerance=24 connectivity=8 formfit_residual_px=1.5 "
           "formfit_mode=closed_polygon_formfit_v1 max_nodes=64 "
-          "minimum_node_spacing_px=4 minimum_region_pixels=32");
+          "minimum_node_spacing_px=4 minimum_region_pixels=32 boundary_anchor_mode=custom");
     }
   } else if (IsTorchContext(m_manualTest) &&
       !IsFindLineFindCircleContext(m_manualTest)) {
@@ -2625,6 +2649,24 @@ void ViewController::DrawAnnotationToolButtonStrip(bool horizontal) {
     const std::string label = tool.label.empty() ? tool.name : tool.label;
     drawButton(tool.name.c_str(), label, active, buttonSize,
                [this, i, active, label, tool, &toolModeFromDefinition]() {
+                 // Unlike ordinary drawing tools, Auto Boundary is an action:
+                 // clicking it must consume the already-created Seg +/- points
+                 // and publish a preview in Image View. The old toolbar only
+                 // toggled activation, so its apparent "test" path never ran
+                 // segmentation and a second click merely disabled the tool.
+                 if (tool.action == "auto_segmentation") {
+                   m_imageToolEnabled = true;
+                   m_imageToolMode = toolModeFromDefinition(tool);
+                   CancelAnnotationCreate();
+                   m_annotationLayer.SetActiveToolIndex(i);
+                   std::string previewReason;
+                   const bool previewReady =
+                       BuildSegmentationPromptBoundaryPreview(previewReason);
+                   m_annotationStatus = previewReady
+                       ? "Seg +/- boundary preview ready: " + previewReason
+                       : "Seg +/- boundary inference not run: " + previewReason;
+                   return;
+                 }
                  if (active) {
                    m_imageToolEnabled = false;
                    m_imageToolMode = ImageToolMode::PointerPan;
