@@ -5,8 +5,11 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <sstream>
+
+#include <opencv2/imgproc.hpp>
 
 #include "CircleShape.h"
 #include "CxAnnotationToolRuntime.h"
@@ -41,6 +44,35 @@ bool AnnotationInputText(const char *label, std::string &value) {
   return ImGui::InputText(label, value.data(), value.capacity() + 1,
                           ImGuiInputTextFlags_CallbackResize,
                           AnnotationStringResize, &value);
+}
+
+std::string BusinessReceiptJsonEscape(const std::string &value) {
+  std::string escaped;
+  escaped.reserve(value.size() + 8);
+  for (const char ch : value) {
+    switch (ch) {
+    case '\\': escaped += "\\\\"; break;
+    case '"': escaped += "\\\""; break;
+    case '\n': escaped += "\\n"; break;
+    case '\r': escaped += "\\r"; break;
+    case '\t': escaped += "\\t"; break;
+    default: escaped += ch; break;
+    }
+  }
+  return escaped;
+}
+
+const char *BusinessReceiptShapeKind(CxShapeKind kind) {
+  switch (kind) {
+  case CxShapeKind::Points: return "point";
+  case CxShapeKind::Line: return "line";
+  case CxShapeKind::Rect: return "rectangle";
+  case CxShapeKind::Circle: return "circle";
+  case CxShapeKind::Ellipse: return "ellipse";
+  case CxShapeKind::Polyline: return "polyline";
+  case CxShapeKind::LineGauge: return "line_gauge";
+  }
+  return "unknown";
 }
 
 void SyncSegmentationLegacyPointFromLists(ManualGaugeState &gauge) {
@@ -1559,6 +1591,8 @@ const char *ViewController::ImageToolModeName(ImageToolMode mode) {
     return "Ellipse";
   case ImageToolMode::PolylineCreate:
     return "Polyline";
+  case ImageToolMode::MagicWandBoundary:
+    return "Magic Wand Boundary";
   case ImageToolMode::AutoBoundary:
     return "Auto Boundary";
   case ImageToolMode::AttachToScript:
@@ -1618,6 +1652,8 @@ static double Distance2(double x0, double y0, double x1, double y1) {
 
 static ImageToolMode
 ToolModeFromAnnotationTool(const AnnotationToolDefinition &tool) {
+  if (tool.action == "magic_wand_boundary")
+    return ImageToolMode::MagicWandBoundary;
   if (tool.kind == OverlayKind::Point)
     return ImageToolMode::PointCreate;
   if (tool.kind == OverlayKind::Line)
@@ -1635,6 +1671,365 @@ ToolModeFromAnnotationTool(const AnnotationToolDefinition &tool) {
       tool.action == "auto_segmentation")
     return ImageToolMode::AutoBoundary;
   return ImageToolMode::PointerPan;
+}
+
+void ViewController::ClearMagicWandPreview(const std::string &status) {
+  m_magicWandPreviewPoints.clear();
+  m_magicWandRawBoundaryPoints.clear();
+  m_magicWandRegionPixels = 0;
+  m_magicWandRawBoundaryPointCount = 0;
+  m_magicWandFormFitNodeCount = 0;
+  m_magicWandStatus = status;
+  m_magicWandFormFitStatus = "FORMFIT_NODE_IDLE";
+}
+
+bool ViewController::WriteBusinessAnnotationReceipt(
+    const CxShapeElement &element, const AnnotationToolDefinition &tool,
+    const std::string &operation, const std::string &status,
+    const std::string &trace, std::string &receiptPath,
+    std::string &reason) const {
+  receiptPath.clear();
+  reason.clear();
+  if (!element.shape) {
+    reason = "accepted annotation has no geometry";
+    return false;
+  }
+
+  std::vector<CxShapePoint> points;
+  bool closed = false;
+  element.shape->exportPolyline(points, closed);
+  if (points.empty())
+    element.shape->exportPoints(points);
+
+  CxShapePoint center;
+  double radius = 0.0;
+  double innerRadius = 0.0;
+  const bool hasCircle =
+      element.shape->exportCircle(center, radius, innerRadius);
+  double radiusX = 0.0;
+  double radiusY = 0.0;
+  double angle = 0.0;
+  const bool hasEllipse =
+      element.shape->exportEllipse(center, radiusX, radiusY, angle);
+  CxShapePoint lineStart;
+  CxShapePoint lineEnd;
+  const bool hasLine = element.shape->exportLine(lineStart, lineEnd);
+
+  const std::string caseId =
+      !m_manualTest.active_case_id.empty()
+          ? m_manualTest.active_case_id
+          : (!m_manualTest.current_evidence_selection.case_id.empty()
+                 ? m_manualTest.current_evidence_selection.case_id
+                 : "local_annotation");
+  const std::string imageLogicalRef =
+      !m_manualTest.active_image_id.empty()
+          ? m_manualTest.active_image_id
+          : (!m_manualTest.current_evidence_selection.image_id.empty()
+                 ? m_manualTest.current_evidence_selection.image_id
+                 : "local_image_unbound");
+  const std::filesystem::path root =
+      ResolveCxVisionRunPath("cxscript_runs/business_annotation_receipts") /
+      caseId;
+  const std::string receiptName =
+      "business_annotation_receipt_" +
+      (element.stable_ref.empty() ? std::to_string(element.id)
+                                  : element.stable_ref) +
+      ".v1.json";
+  const std::filesystem::path path = root / receiptName;
+
+  try {
+    std::filesystem::create_directories(root);
+    std::ofstream output(path);
+    if (!output) {
+      reason = "failed to create local business annotation receipt";
+      return false;
+    }
+    output << "{\n"
+           << "  \"schema\": \"business_annotation_receipt.v1\",\n"
+           << "  \"case_id\": \"" << BusinessReceiptJsonEscape(caseId)
+           << "\",\n"
+           << "  \"image_logical_ref\": \""
+           << BusinessReceiptJsonEscape(imageLogicalRef) << "\",\n"
+           << "  \"image_width\": " << m_imageViewImage.cols << ",\n"
+           << "  \"image_height\": " << m_imageViewImage.rows << ",\n"
+           << "  \"tool\": \"" << BusinessReceiptJsonEscape(tool.id)
+           << "\",\n"
+           << "  \"operation\": \""
+           << BusinessReceiptJsonEscape(operation) << "\",\n"
+           << "  \"status\": \"" << BusinessReceiptJsonEscape(status)
+           << "\",\n"
+           << "  \"geometry\": {\n"
+           << "    \"kind\": \""
+           << BusinessReceiptShapeKind(element.shape->kind()) << "\",\n"
+           << "    \"closed\": " << (closed ? "true" : "false") << ",\n"
+           << "    \"editable\": " << (element.editable ? "true" : "false")
+           << ",\n"
+           << "    \"pixel_points\": [";
+    for (std::size_t index = 0; index < points.size(); ++index) {
+      if (index != 0)
+        output << ", ";
+      output << "{\"x\":" << points[index].x << ",\"y\":"
+             << points[index].y << "}";
+    }
+    output << "]";
+    if (hasCircle) {
+      output << ",\n    \"circle\": {\"cx\":" << center.x
+             << ",\"cy\":" << center.y << ",\"radius\":" << radius
+             << ",\"inner_radius\":" << innerRadius << "}";
+    } else if (hasEllipse) {
+      output << ",\n    \"ellipse\": {\"cx\":" << center.x
+             << ",\"cy\":" << center.y << ",\"radius_x\":" << radiusX
+             << ",\"radius_y\":" << radiusY << ",\"angle_deg\":"
+             << angle << "}";
+    } else if (hasLine) {
+      output << ",\n    \"line\": {\"x0\":" << lineStart.x
+             << ",\"y0\":" << lineStart.y << ",\"x1\":" << lineEnd.x
+             << ",\"y1\":" << lineEnd.y << "}";
+    }
+    output << "\n  },\n";
+
+    if (tool.action == "magic_wand_boundary") {
+      output << "  \"seed\": {\"x\":" << m_magicWandSeed.x
+             << ",\"y\":" << m_magicWandSeed.y << "},\n"
+             << "  \"parameters\": {\"algorithm\": \""
+             << (m_magicWandAlgorithm == 0 ? "color_fixed_range_v1"
+                                           : "color_connected_range_v1")
+             << "\", \"color_tolerance\": " << m_magicWandColorTolerance
+             << ", \"connectivity\": "
+             << (m_magicWandEightConnected ? 8 : 4)
+             << ", \"node_residual_px\": " << m_magicWandSimplifyPixels
+             << ", \"maximum_nodes\": " << m_magicWandMaximumNodes
+             << ", \"minimum_node_spacing_px\": "
+             << m_magicWandMinimumNodeSpacingPixels << "},\n"
+             << "  \"raw_boundary_point_count\": "
+             << m_magicWandRawBoundaryPointCount << ",\n"
+             << "  \"node_count\": " << m_magicWandFormFitNodeCount
+             << ",\n";
+    } else {
+      output << "  \"seed\": null,\n"
+             << "  \"parameters\": {},\n"
+             << "  \"raw_boundary_point_count\": 0,\n"
+             << "  \"node_count\": " << points.size() << ",\n";
+    }
+    output << "  \"trace\": \"" << BusinessReceiptJsonEscape(trace)
+           << "\"\n}\n";
+    receiptPath = path.string();
+    reason = "business_annotation_receipt.v1 written without image data";
+    return true;
+  } catch (const std::exception &exception) {
+    reason = "business annotation receipt exception: " +
+             std::string(exception.what());
+    return false;
+  }
+}
+
+bool ViewController::BuildMagicWandFormFitNodes(
+    const std::vector<cv::Point> &contour, std::string &reason) {
+  m_magicWandPreviewPoints.clear();
+  m_magicWandRawBoundaryPoints.clear();
+  m_magicWandRawBoundaryPointCount = static_cast<int>(contour.size());
+  m_magicWandFormFitNodeCount = 0;
+  if (contour.size() < 3) {
+    m_magicWandFormFitStatus = "FORMFIT_NODE_INSUFFICIENT_BOUNDARY";
+    reason = "raw boundary has fewer than three points";
+    return false;
+  }
+
+  for (const cv::Point &point : contour)
+    m_magicWandRawBoundaryPoints.push_back(
+        {static_cast<double>(point.x), static_cast<double>(point.y)});
+
+  const int maximumNodes = std::clamp(m_magicWandMaximumNodes, 3, 1024);
+  const double minimumSpacing =
+      std::max(0.0f, m_magicWandMinimumNodeSpacingPixels);
+  std::vector<cv::Point> candidate;
+  if (m_magicWandNodeizationMode == 0) {
+    // FormFit node extraction: iteratively increase the residual tolerance
+    // until the closed contour has a bounded, reviewable set of geometric
+    // nodes.  This is a single-boundary fit, not FastMatch correspondence.
+    double epsilon = std::max(0.0f, m_magicWandSimplifyPixels);
+    for (int iteration = 0; iteration < 12; ++iteration) {
+      cv::approxPolyDP(contour, candidate, epsilon, true);
+      if (static_cast<int>(candidate.size()) <= maximumNodes || epsilon <= 0.0)
+        break;
+      epsilon = std::max(0.5, epsilon * 1.45);
+    }
+  } else {
+    candidate = contour;
+  }
+
+  std::vector<cv::Point> nodes;
+  nodes.reserve(candidate.size());
+  const auto farEnough = [minimumSpacing](const cv::Point &left,
+                                           const cv::Point &right) {
+    const double dx = static_cast<double>(left.x - right.x);
+    const double dy = static_cast<double>(left.y - right.y);
+    return dx * dx + dy * dy >= minimumSpacing * minimumSpacing;
+  };
+  for (const cv::Point &point : candidate) {
+    if (nodes.empty() || farEnough(nodes.back(), point))
+      nodes.push_back(point);
+    if (static_cast<int>(nodes.size()) >= maximumNodes)
+      break;
+  }
+  if (nodes.size() >= 3 && !farEnough(nodes.front(), nodes.back()))
+    nodes.pop_back();
+  if (nodes.size() < 3) {
+    m_magicWandFormFitStatus = "FORMFIT_NODE_EXTRACTION_FAILED";
+    reason = "node spacing/residual constraints left fewer than three nodes";
+    return false;
+  }
+
+  for (const cv::Point &node : nodes)
+    m_magicWandPreviewPoints.push_back(
+        {static_cast<double>(node.x), static_cast<double>(node.y)});
+  m_magicWandFormFitNodeCount = static_cast<int>(nodes.size());
+  m_magicWandFormFitStatus =
+      m_magicWandNodeizationMode == 0 ? "FORMFIT_CLOSED_POLYGON_READY"
+                                      : "FORMFIT_RAW_CONTOUR_DEBUG_READY";
+  reason = "FormFit nodes: raw=" +
+           std::to_string(m_magicWandRawBoundaryPointCount) +
+           ", nodes=" + std::to_string(m_magicWandFormFitNodeCount) +
+           ", max_nodes=" + std::to_string(maximumNodes) +
+           ", min_spacing_px=" + std::to_string(minimumSpacing);
+  return true;
+}
+
+bool ViewController::BuildMagicWandPreview(double imageX, double imageY,
+                                            std::string &reason) {
+  ClearMagicWandPreview("MAGIC_WAND_RUNNING");
+  if (m_imageViewImage.empty()) {
+    m_magicWandStatus = "MAGIC_WAND_NO_IMAGE";
+    reason = "no local image is loaded";
+    return false;
+  }
+
+  const int seedX = static_cast<int>(std::lround(imageX));
+  const int seedY = static_cast<int>(std::lround(imageY));
+  if (seedX < 0 || seedY < 0 || seedX >= m_imageViewImage.cols ||
+      seedY >= m_imageViewImage.rows) {
+    m_magicWandStatus = "MAGIC_WAND_SEED_OUT_OF_BOUNDS";
+    reason = "seed point is outside the local image";
+    return false;
+  }
+
+  cv::Mat source;
+  if (m_imageViewImage.channels() == 1) {
+    cv::cvtColor(m_imageViewImage, source, cv::COLOR_GRAY2BGR);
+  } else if (m_imageViewImage.channels() == 4) {
+    cv::cvtColor(m_imageViewImage, source, cv::COLOR_BGRA2BGR);
+  } else if (m_imageViewImage.channels() == 3) {
+    source = m_imageViewImage;
+  } else {
+    m_magicWandStatus = "MAGIC_WAND_UNSUPPORTED_IMAGE";
+    reason = "image channel format is not supported";
+    return false;
+  }
+
+  const int tolerance = std::clamp(m_magicWandColorTolerance, 0, 255);
+  cv::Mat floodMask = cv::Mat::zeros(source.rows + 2, source.cols + 2, CV_8UC1);
+  const int connectivity = m_magicWandEightConnected ? 8 : 4;
+  const bool fixedRange = m_magicWandAlgorithm == 0;
+  const int flags = connectivity | cv::FLOODFILL_MASK_ONLY |
+                    (fixedRange ? cv::FLOODFILL_FIXED_RANGE : 0) |
+                    (255 << 8);
+  const int regionPixels = cv::floodFill(
+      source, floodMask, cv::Point(seedX, seedY), cv::Scalar(), nullptr,
+      cv::Scalar(tolerance, tolerance, tolerance),
+      cv::Scalar(tolerance, tolerance, tolerance), flags);
+  if (regionPixels < std::max(3, m_magicWandMinimumRegionPixels)) {
+    m_magicWandStatus = "MAGIC_WAND_REGION_TOO_SMALL";
+    reason = "seed region contains " + std::to_string(regionPixels) +
+             " pixels; increase tolerance or choose another seed";
+    return false;
+  }
+
+  cv::Mat region = floodMask(cv::Rect(1, 1, source.cols, source.rows)).clone();
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(region, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+  if (contours.empty()) {
+    m_magicWandStatus = "MAGIC_WAND_BOUNDARY_FAILED";
+    reason = "no external boundary could be extracted from seed region";
+    return false;
+  }
+
+  const auto largest = std::max_element(
+      contours.begin(), contours.end(), [](const std::vector<cv::Point> &a,
+                                            const std::vector<cv::Point> &b) {
+        return std::abs(cv::contourArea(a)) < std::abs(cv::contourArea(b));
+      });
+  std::string formFitReason;
+  if (!BuildMagicWandFormFitNodes(*largest, formFitReason)) {
+    m_magicWandStatus = "MAGIC_WAND_NODEIZATION_FAILED";
+    reason = formFitReason;
+    return false;
+  }
+  m_magicWandSeed = {static_cast<float>(seedX), static_cast<float>(seedY)};
+  m_magicWandRegionPixels = regionPixels;
+  m_magicWandStatus = "MAGIC_WAND_PREVIEW_READY";
+  reason = "local seed boundary preview: region_pixels=" +
+           std::to_string(regionPixels) + ", formfit_nodes=" +
+           std::to_string(m_magicWandPreviewPoints.size()) + ", " +
+           formFitReason + ", algorithm=" +
+           std::string(fixedRange ? "color_fixed_range_v1"
+                                  : "color_connected_range_v1") +
+           ", tolerance=" + std::to_string(tolerance) +
+           ", connectivity=" + std::to_string(connectivity);
+  return true;
+}
+
+bool ViewController::CommitMagicWandPreview(CxImagePointerResult &out) {
+  const AnnotationToolDefinition *tool = m_annotationLayer.ActiveTool();
+  if (tool == nullptr || tool->action != "magic_wand_boundary") {
+    out.status = "failed";
+    out.reason = "Magic Wand Boundary is not the active annotation tool";
+    return false;
+  }
+  if (m_magicWandPreviewPoints.size() < 3) {
+    out.status = "failed";
+    out.reason = "no Magic Wand Boundary preview is ready to accept";
+    return false;
+  }
+  if (m_magicWandNodeizationMode != 0) {
+    out.status = "failed";
+    out.reason =
+        "raw contour nodeization is diagnostic-only; switch to Closed polygon FormFit before accepting";
+    return false;
+  }
+
+  auto shape = std::make_unique<PolylineShape>();
+  for (const CxShapePoint &point : m_magicWandPreviewPoints)
+    shape->addPoint(point.x, point.y);
+  shape->close(true);
+  CxShapeElement &element =
+      m_annotationLayer.CreateFromTool(*tool, std::move(shape));
+  m_annotationLayer.SelectShape(
+      static_cast<int>(m_annotationLayer.ShapeElements().size()) - 1);
+  out.consumed = true;
+  out.phase = "magic_wand_accept";
+  out.status = "created";
+  out.created_ref = element.stable_ref;
+  out.reason = "Magic Wand Boundary preview accepted as editable boundary";
+
+  std::ostringstream trace;
+  trace << "ref=" << out.created_ref << " seed=(" << m_magicWandSeed.x
+        << "," << m_magicWandSeed.y << ") algorithm="
+        << (m_magicWandAlgorithm == 0 ? "color_fixed_range_v1"
+                                      : "color_connected_range_v1")
+        << " tolerance="
+        << m_magicWandColorTolerance << " connectivity="
+        << (m_magicWandEightConnected ? 8 : 4) << " simplify_px="
+        << m_magicWandSimplifyPixels << " region_pixels="
+        << m_magicWandRegionPixels << " raw_boundary_points="
+        << m_magicWandRawBoundaryPointCount << " formfit_nodes="
+        << m_magicWandFormFitNodeCount << " formfit_status="
+        << m_magicWandFormFitStatus;
+  RecordManualOperationTraceEvent(m_manualTest, "magic_wand_boundary_accept",
+                                  "created", trace.str());
+  CXLOG_INFO("ImageAnnotationUI", "magic_wand_boundary_accept", "created",
+             trace.str());
+  ClearMagicWandPreview("MAGIC_WAND_ACCEPTED");
+  return true;
 }
 
 bool ViewController::CommitDraftShapeFromTool(
@@ -1720,6 +2115,7 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
   if (frame.escape_pressed) {
     m_annotationDragging = false;
     m_activePolylinePoints.clear();
+    ClearMagicWandPreview("MAGIC_WAND_CANCELLED");
     m_annotationLayer.CancelDrag();
     out.consumed = true;
     out.phase = "cancel";
@@ -1960,6 +2356,39 @@ CxImagePointerResult ViewController::ProcessImageAnnotationPointerFrame(
   }
 
   OverlayKind currentKind = activeTool->kind;
+
+  if (activeTool->action == "magic_wand_boundary") {
+    if (frame.left_clicked) {
+      std::string reason;
+      const bool ok = BuildMagicWandPreview(frame.image_x, frame.image_y, reason);
+      out.consumed = true;
+      out.phase = "magic_wand_preview";
+      out.status = ok ? "preview_ready" : "failed";
+      out.reason = reason;
+      if (ok) {
+        std::ostringstream trace;
+        trace << "seed=(" << m_magicWandSeed.x << "," << m_magicWandSeed.y
+              << ") algorithm="
+              << (m_magicWandAlgorithm == 0 ? "color_fixed_range_v1"
+                                            : "color_connected_range_v1")
+              << " tolerance=" << m_magicWandColorTolerance
+              << " connectivity=" << (m_magicWandEightConnected ? 8 : 4)
+              << " region_pixels=" << m_magicWandRegionPixels
+              << " raw_boundary_points=" << m_magicWandRawBoundaryPointCount
+              << " formfit_nodes=" << m_magicWandFormFitNodeCount
+              << " formfit_status=" << m_magicWandFormFitStatus;
+        RecordManualOperationTraceEvent(m_manualTest,
+                                        "magic_wand_boundary_preview",
+                                        "preview_ready", trace.str());
+        CXLOG_INFO("ImageAnnotationUI", "magic_wand_boundary_preview",
+                   "preview_ready", trace.str());
+      }
+      m_lastPointerResult = out;
+      return out;
+    }
+    m_lastPointerResult = out;
+    return out;
+  }
 
   if (currentKind == OverlayKind::Point) {
     if (frame.left_clicked) {
@@ -2400,6 +2829,37 @@ void ViewController::drawImageEvidenceOnCanvas(bool canvasHovered,
     }
   }
 
+  if (m_magicWandPreviewPoints.size() >= 3) {
+    if (m_magicWandRawBoundaryPoints.size() >= 3) {
+      std::vector<ImVec2> rawScreenPoints;
+      rawScreenPoints.reserve(m_magicWandRawBoundaryPoints.size());
+      for (const CxShapePoint &point : m_magicWandRawBoundaryPoints) {
+        rawScreenPoints.push_back(
+            ImageToScreen(static_cast<float>(point.x), static_cast<float>(point.y)));
+      }
+      drawList->AddPolyline(rawScreenPoints.data(),
+                            static_cast<int>(rawScreenPoints.size()),
+                            IM_COL32(130, 164, 205, 120), ImDrawFlags_Closed,
+                            1.0f);
+    }
+    const ImU32 previewColor = IM_COL32(88, 232, 168, 245);
+    std::vector<ImVec2> screenPoints;
+    screenPoints.reserve(m_magicWandPreviewPoints.size());
+    for (const CxShapePoint &point : m_magicWandPreviewPoints) {
+      screenPoints.push_back(
+          ImageToScreen(static_cast<float>(point.x), static_cast<float>(point.y)));
+    }
+    drawList->AddPolyline(screenPoints.data(), static_cast<int>(screenPoints.size()),
+                          previewColor, ImDrawFlags_Closed, 2.5f);
+    for (const ImVec2 &node : screenPoints)
+      drawList->AddCircleFilled(node, 3.5f, IM_COL32(255, 224, 86, 245));
+    const ImVec2 seed = ImageToScreen(m_magicWandSeed.x, m_magicWandSeed.y);
+    drawList->AddCircleFilled(seed, 4.5f, previewColor);
+    drawList->AddCircle(seed, 7.0f, IM_COL32(255, 255, 255, 240), 16, 1.5f);
+    drawList->AddText(ImVec2(seed.x + 8.0f, seed.y - 16.0f), previewColor,
+                      "Magic Wand FormFit nodes - accept in Annotation Tools");
+  }
+
   for (int elementIndex = 0;
        elementIndex < static_cast<int>(m_annotationLayer.Elements().size());
        ++elementIndex) {
@@ -2572,6 +3032,7 @@ void ViewController::drawImageEvidencePanels() {
       m_imageToolEnabled = false;
       m_imageToolMode = ImageToolMode::PointerPan;
       CancelAnnotationCreate();
+      ClearMagicWandPreview("MAGIC_WAND_IDLE");
       m_annotationLayer.SetActiveToolIndex(-1);
       m_annotationStatus = "annotation tool disabled";
     }
@@ -2609,6 +3070,8 @@ void ViewController::drawImageEvidencePanels() {
         m_imageToolEnabled = true;
         m_imageToolMode = ToolModeFromAnnotationTool(tool);
         CancelAnnotationCreate();
+        if (tool.action != "magic_wand_boundary")
+          ClearMagicWandPreview("MAGIC_WAND_IDLE");
         m_annotationLayer.SetActiveToolIndex(toolIndex);
         m_annotationStatus = "enabled tool_id=" + tool.name +
                              " shape=" + tool.shape_type +
@@ -2631,6 +3094,98 @@ void ViewController::drawImageEvidencePanels() {
     if (!tool.manual_visible)
       continue;
     drawManifestToolButton(i, tool);
+  }
+
+  const AnnotationToolDefinition *magicTool = m_annotationLayer.ActiveTool();
+  if (magicTool != nullptr && magicTool->action == "magic_wand_boundary") {
+    ImGui::Separator();
+    ImGui::TextUnformatted("Magic Wand Boundary — local automatic boundary");
+    ImGui::TextDisabled(
+        "Click an object pixel to build a temporary boundary. Accept writes an editable polygon.");
+    ImGui::TextDisabled("Default profile: magic_wand_default_v1");
+    if (ImGui::Button("Restore Default Profile", ImVec2(-1.0f, 28.0f))) {
+      m_magicWandAlgorithm = 0;
+      m_magicWandColorTolerance = 24;
+      m_magicWandEightConnected = true;
+      m_magicWandSimplifyPixels = 1.5f;
+      m_magicWandMinimumRegionPixels = 32;
+      m_magicWandNodeizationMode = 0;
+      m_magicWandMaximumNodes = 64;
+      m_magicWandMinimumNodeSpacingPixels = 4.0f;
+      ClearMagicWandPreview("MAGIC_WAND_DEFAULTS_RESTORED");
+      m_annotationStatus = "Magic Wand default profile restored";
+      RecordManualOperationTraceEvent(
+          m_manualTest, "magic_wand_default_profile", "restored",
+          "profile=magic_wand_default_v1 algorithm=color_fixed_range_v1 "
+          "tolerance=24 connectivity=8 formfit_residual_px=1.5 "
+          "formfit_mode=closed_polygon_formfit_v1 max_nodes=64 "
+          "minimum_node_spacing_px=4 minimum_region_pixels=32");
+    }
+    bool parametersChanged = false;
+    const char *algorithmOptions[] = {
+        "Color fixed range (default)", "Connected color range"};
+    parametersChanged |= ImGui::Combo("Algorithm", &m_magicWandAlgorithm,
+                                      algorithmOptions, IM_ARRAYSIZE(algorithmOptions));
+    parametersChanged |= ImGui::SliderInt("Color tolerance", &m_magicWandColorTolerance, 0, 128);
+    parametersChanged |= ImGui::Checkbox("8-connected region", &m_magicWandEightConnected);
+    ImGui::SeparatorText("FormFit geometry nodes");
+    const char *nodeizationOptions[] = {
+        "Closed polygon FormFit (default)", "Raw contour nodes (debug)"};
+    parametersChanged |= ImGui::Combo("Nodeization mode", &m_magicWandNodeizationMode,
+                                      nodeizationOptions, IM_ARRAYSIZE(nodeizationOptions));
+    parametersChanged |= ImGui::SliderFloat("FormFit residual (px)", &m_magicWandSimplifyPixels,
+                                             0.0f, 12.0f, "%.1f");
+    parametersChanged |= ImGui::SliderInt("Maximum geometry nodes", &m_magicWandMaximumNodes,
+                                           3, 256);
+    parametersChanged |= ImGui::SliderFloat("Minimum node spacing (px)",
+                                             &m_magicWandMinimumNodeSpacingPixels,
+                                             0.0f, 32.0f, "%.1f");
+    parametersChanged |= ImGui::InputInt("Minimum region pixels", &m_magicWandMinimumRegionPixels);
+    m_magicWandMinimumRegionPixels =
+        std::clamp(m_magicWandMinimumRegionPixels, 3, 1000000);
+    if (parametersChanged && !m_magicWandPreviewPoints.empty()) {
+      ClearMagicWandPreview("MAGIC_WAND_PREVIEW_STALE_PARAMETERS_CHANGED");
+      m_annotationStatus = "Magic Wand preview discarded because its parameters changed";
+    }
+    ImGui::Text("Status: %s", m_magicWandStatus.c_str());
+    ImGui::Text("FormFit: %s", m_magicWandFormFitStatus.c_str());
+    ImGui::Text("Preview: raw boundary=%d | geometry nodes=%d | region pixels=%d",
+                m_magicWandRawBoundaryPointCount, m_magicWandFormFitNodeCount,
+                m_magicWandRegionPixels);
+
+    const bool hasPreview = m_magicWandPreviewPoints.size() >= 3;
+    const bool canAcceptPreview = hasPreview && m_magicWandNodeizationMode == 0;
+    if (!canAcceptPreview)
+      ImGui::BeginDisabled();
+    if (ImGui::Button("Accept Boundary", ImVec2(-1.0f, 28.0f))) {
+      CxImagePointerResult acceptResult;
+      if (CommitMagicWandPreview(acceptResult)) {
+        m_annotationStatus = acceptResult.status + ": " + acceptResult.reason;
+        m_lastPointerResult = acceptResult;
+      } else {
+        m_annotationStatus = "failed: " + acceptResult.reason;
+      }
+    }
+    if (!canAcceptPreview)
+      ImGui::EndDisabled();
+    if (hasPreview && m_magicWandNodeizationMode != 0)
+      ImGui::TextDisabled(
+          "Raw contour nodes are preview evidence only; switch to Closed polygon FormFit to accept.");
+    if (ImGui::Button("Discard Preview", ImVec2(-1.0f, 28.0f))) {
+      ClearMagicWandPreview("MAGIC_WAND_DISCARDED");
+      m_annotationStatus = "Magic Wand Boundary preview discarded";
+    }
+
+    if (ImGui::CollapsingHeader("Magic Wand Algorithm Catalog")) {
+      ImGui::TextWrapped(
+          "color_fixed_range_v1 — AVAILABLE / default. Each candidate pixel is compared with the seed color; most stable for controlled material regions.");
+      ImGui::TextWrapped(
+          "color_connected_range_v1 — AVAILABLE. Neighbor-to-neighbor growth; useful for gradual shading, but can leak across weak boundaries.");
+      ImGui::TextWrapped(
+          "edge_assisted_snap_v1 — PLANNED. It is intentionally not selectable until edge evidence, parameter contract and regression case exist.");
+      ImGui::TextDisabled(
+          "This is classical local CV, not a remote model. No image or pixel leaves this workstation.");
+    }
   }
 
   ImGui::Separator();
@@ -2688,6 +3243,7 @@ void ViewController::drawImageEvidencePanels() {
     m_imageToolEnabled = false;
     m_imageToolMode = ImageToolMode::PointerPan;
     CancelAnnotationCreate();
+    ClearMagicWandPreview("MAGIC_WAND_CANCELLED");
     m_annotationLayer.SetActiveToolIndex(-1);
     m_annotationStatus = "annotation tool disabled (ESC)";
   }

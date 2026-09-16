@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 struct ScriptLineView {
   int line_no = 0;
@@ -1786,6 +1787,17 @@ struct ManualTestContext {
   int selected_evidence_thumb = -1;
 
   std::vector<ScriptEvidenceGroup> script_evidence_groups;
+  // The active Evidence list stays small.  The catalog is metadata-only and
+  // contains cases that an operator may explicitly add to the active list.
+  // It never loads a thumbnail or activates an image by itself.
+  std::vector<ScriptEvidenceThumb> hidden_evidence_case_catalog;
+  std::unordered_set<std::string> selected_hidden_evidence_case_keys;
+  // Runtime-only operator exclusions. Asset-declared manual_visible supplies
+  // an initial queue only; a right-click Hide must win until explicitly added
+  // again in this session.
+  std::unordered_set<std::string> operator_hidden_evidence_case_keys;
+  std::string hidden_evidence_case_filter;
+  bool hidden_evidence_case_catalog_dirty = true;
   int selected_evidence_group = -1;
   std::string script_evidence_case_filter;
   bool script_evidence_groups_dirty = true;

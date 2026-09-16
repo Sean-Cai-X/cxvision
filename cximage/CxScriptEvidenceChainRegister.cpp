@@ -185,6 +185,15 @@ double CxEvidenceChain_case_setrole(const char* value)
     return 0.0;
 }
 
+double CxEvidenceChain_case_setdisplayname(const char* value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    g_current_evidence_case->display_name = value ? value : "";
+    return 0.0;
+}
+
 double CxEvidenceChain_case_setsourcecase(const char* value)
 {
     if (!g_current_evidence_case)
@@ -227,6 +236,15 @@ double CxEvidenceChain_case_setgroup(const char* value)
         return 0.0;
 
     g_current_evidence_case->display_group = value ? value : "";
+    return 0.0;
+}
+
+double CxEvidenceChain_case_setmanualvisible(double value)
+{
+    if (!g_current_evidence_case)
+        return 0.0;
+
+    g_current_evidence_case->manual_visible = value != 0.0;
     return 0.0;
 }
 
@@ -421,11 +439,13 @@ void RegisterCxScriptEvidenceChainBindings(mu::Parser& parser)
     parser.DefineFun("CxEvidenceChain_case_setexpected", (mu::strfun_type1)&CxEvidenceChain_case_setexpected);
     parser.DefineFun("CxEvidenceChain_case_setexpectedpolicyguard", (mu::strfun_type1)&CxEvidenceChain_case_setexpectedpolicyguard);
     parser.DefineFun("CxEvidenceChain_case_setrole", (mu::strfun_type1)&CxEvidenceChain_case_setrole);
+    parser.DefineFun("CxEvidenceChain_case_setdisplayname", (mu::strfun_type1)&CxEvidenceChain_case_setdisplayname);
     parser.DefineFun("CxEvidenceChain_case_setsourcecase", (mu::strfun_type1)&CxEvidenceChain_case_setsourcecase);
     parser.DefineFun("CxEvidenceChain_case_settool", (mu::strfun_type1)&CxEvidenceChain_case_settool);
     parser.DefineFun("CxEvidenceChain_case_setlevel", (mu::strfun_type1)&CxEvidenceChain_case_setlevel);
     parser.DefineFun("CxEvidenceChain_case_setcategory", (mu::strfun_type1)&CxEvidenceChain_case_setcategory);
     parser.DefineFun("CxEvidenceChain_case_setgroup", (mu::strfun_type1)&CxEvidenceChain_case_setgroup);
+    parser.DefineFun("CxEvidenceChain_case_setmanualvisible", &CxEvidenceChain_case_setmanualvisible);
     parser.DefineFun("CxEvidenceChain_case_setworkflow", (mu::strfun_type1)&CxEvidenceChain_case_setworkflow);
     parser.DefineFun("CxEvidenceChain_case_setadmission", (mu::strfun_type1)&CxEvidenceChain_case_setadmission);
     parser.DefineFun("CxEvidenceChain_case_adddatasetimage", (mu::strfun_type1)&CxEvidenceChain_case_adddatasetimage);

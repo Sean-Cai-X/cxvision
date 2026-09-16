@@ -4266,6 +4266,7 @@ static int AppendCxScriptEvidenceChainFilesLocal(
     const std::function<ScriptEvidenceGroup &(const std::string &)> &findGroup,
     const std::vector<std::string> &fallbackImages,
     std::unordered_map<std::string, std::size_t> &fallbackImageIndexByPool,
+    const std::unordered_set<std::string> *selectedCaseKeys,
     std::string &reason) {
   reason.clear();
   const std::filesystem::path root =
@@ -4309,6 +4310,12 @@ static int AppendCxScriptEvidenceChainFilesLocal(
         ResolveEvidenceChainFolderPlacementLocal(root, file);
 
     for (const CxScriptEvidenceCase &c : chain.cases) {
+      const std::string catalogKey =
+          file.lexically_normal().generic_string() + "::" + c.evidence_id;
+      if (selectedCaseKeys != nullptr &&
+          selectedCaseKeys->find(catalogKey) == selectedCaseKeys->end()) {
+        continue;
+      }
       const auto existingCase = std::find_if(
           context.evidence_items.begin(), context.evidence_items.end(),
           [&](const ManualEvidenceItem &item) {
@@ -4335,6 +4342,7 @@ static int AppendCxScriptEvidenceChainFilesLocal(
       }
       ScriptEvidenceThumb thumb;
       thumb.case_id = c.evidence_id;
+      thumb.review_item = c.display_name;
       thumb.script_id = DeriveEvidenceScriptIdLocal(c.script_id);
       thumb.script_path =
           ResolveEvidenceChainScriptPathLocal(context, c.script_id);
@@ -4456,6 +4464,59 @@ static int AppendCxScriptEvidenceChainFilesLocal(
     oss << " skipped=" << errors.size() << " first_error=" << errors.front();
   reason = oss.str();
   return appended;
+}
+
+static void RefreshHiddenEvidenceCaseCatalogLocal(ManualTestContext &context) {
+  if (!context.hidden_evidence_case_catalog_dirty)
+    return;
+  context.hidden_evidence_case_catalog.clear();
+
+  const std::filesystem::path root =
+      ResolveWorkspaceFile("cxparser/cxscript/module/cximage/evidence");
+  std::error_code ec;
+  if (!std::filesystem::is_directory(root, ec))
+    return;
+
+  std::vector<std::filesystem::path> files;
+  std::filesystem::recursive_directory_iterator it(
+      root, std::filesystem::directory_options::skip_permission_denied, ec);
+  const std::filesystem::recursive_directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    if (it->is_regular_file(ec) && it->path().extension() == ".cxsc")
+      files.push_back(it->path());
+  }
+  std::stable_sort(files.begin(), files.end());
+  for (const std::filesystem::path &file : files) {
+    CxScriptEvidenceChainRuntime chain;
+    std::string ignored;
+    if (!LoadCxScriptEvidenceChainFile(file.string(), chain, ignored))
+      continue;
+    for (const CxScriptEvidenceCase &c : chain.cases) {
+      ScriptEvidenceThumb entry;
+      entry.case_id = c.evidence_id;
+      entry.review_item = c.display_name.empty() ? c.evidence_id : c.display_name;
+      entry.source_evidence_script_path =
+          file.lexically_normal().generic_string();
+      entry.tool = NormalizeEvidenceToolTypeLocal(c.tool);
+      entry.evidence_level = c.level;
+      entry.evidence_case_role = c.case_role;
+      entry.workflow_id = c.workflow_id;
+      entry.workflow_status = c.workflow_status;
+      entry.admission_status = c.admission_status;
+      entry.parameter_summary = c.parameter_profile_id;
+      entry.expected_result = c.expected_result;
+      entry.expected_policy_guard = c.expected_policy_guard;
+      context.hidden_evidence_case_catalog.push_back(std::move(entry));
+      const std::string caseKey =
+          file.lexically_normal().generic_string() + "::" + c.evidence_id;
+      if (c.manual_visible &&
+          context.operator_hidden_evidence_case_keys.find(caseKey) ==
+              context.operator_hidden_evidence_case_keys.end()) {
+        context.selected_hidden_evidence_case_keys.insert(caseKey);
+      }
+    }
+  }
+  context.hidden_evidence_case_catalog_dirty = false;
 }
 
 struct AssetCaseScanRejectionLocal {
@@ -5249,6 +5310,7 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
     return;
 
   LoadEvidenceCategoryOverridesLocal(m_manualTest);
+  RefreshHiddenEvidenceCaseCatalogLocal(m_manualTest);
 
   const bool curatedAssetOnly = IsCuratedAssetOnlyEvidenceQueueLocal();
   if (curatedAssetOnly) {
@@ -5278,6 +5340,18 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
     std::string curatedAssetReason;
     AppendAssetDrivenEvidenceCasesLocal(m_manualTest, findCuratedGroup,
                                         curatedAssetReason);
+    if (!m_manualTest.selected_hidden_evidence_case_keys.empty()) {
+      const std::vector<std::string> fallbackImages =
+          BuildEvidenceFallbackImageCandidates(m_manualTest);
+      std::unordered_map<std::string, std::size_t> fallbackImageIndexByPool;
+      std::string selectedCatalogReason;
+      AppendCxScriptEvidenceChainFilesLocal(
+          m_manualTest, findCuratedGroup, fallbackImages,
+          fallbackImageIndexByPool,
+          &m_manualTest.selected_hidden_evidence_case_keys,
+          selectedCatalogReason);
+      curatedAssetReason += "; selected hidden cases: " + selectedCatalogReason;
+    }
     m_manualTest.debug_reason =
         "Evidence queue mode=CURATED_ASSET_ONLY; " + curatedAssetReason;
     ++m_manualTest.script_evidence_groups_revision;
@@ -5397,7 +5471,9 @@ void ViewController::EnsureCxScriptWorkbenchAssetsLoaded() {
         [&](const std::string &label) -> ScriptEvidenceGroup & {
           return findOrCreateGroup("", "", label);
         },
-        fallbackImages, fallbackImageIndexByPool, evidenceChainReason);
+        fallbackImages, fallbackImageIndexByPool,
+        &m_manualTest.selected_hidden_evidence_case_keys,
+        evidenceChainReason);
     if (!evidenceChainReason.empty()) {
       if (!m_manualTest.debug_reason.empty() &&
           m_manualTest.debug_reason != "not started") {
@@ -14380,6 +14456,81 @@ static void DrawFastMatchNormalTraceEvidenceLocal(
 }
 
 void ViewController::DrawScriptEvidenceThumbnailRailByGroup() {
+  RefreshHiddenEvidenceCaseCatalogLocal(m_manualTest);
+  if (ImGui::CollapsingHeader("Add Hidden Evidence Case", ImGuiTreeNodeFlags_None)) {
+    ImGui::TextDisabled(
+        "The catalog is metadata-only. Cases enter the active list only after an explicit Add action; no image is loaded here.");
+    InputTextString("Find hidden case", m_manualTest.hidden_evidence_case_filter);
+    std::string filter = TrimLine(m_manualTest.hidden_evidence_case_filter);
+    std::transform(filter.begin(), filter.end(), filter.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    int shown = 0;
+    if (ImGui::BeginChild("hidden_evidence_case_catalog", ImVec2(-1.0f, 180.0f),
+                          true)) {
+      for (std::size_t index = 0;
+           index < m_manualTest.hidden_evidence_case_catalog.size(); ++index) {
+        const ScriptEvidenceThumb &entry =
+            m_manualTest.hidden_evidence_case_catalog[index];
+        const std::string key = entry.source_evidence_script_path + "::" +
+                                entry.case_id;
+        std::string searchable = entry.case_id + " " + entry.evidence_case_role +
+                                 " " + entry.tool + " " +
+                                 entry.source_evidence_script_path;
+        std::transform(searchable.begin(), searchable.end(), searchable.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (!filter.empty() && searchable.find(filter) == std::string::npos)
+          continue;
+        ++shown;
+        const bool added =
+            m_manualTest.selected_hidden_evidence_case_keys.find(key) !=
+            m_manualTest.selected_hidden_evidence_case_keys.end();
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TextUnformatted(entry.case_id.c_str());
+        ImGui::TextDisabled("tool=%s | role=%s | status=%s",
+                            entry.tool.empty() ? "-" : entry.tool.c_str(),
+                            entry.evidence_case_role.empty()
+                                ? "-"
+                                : entry.evidence_case_role.c_str(),
+                            entry.workflow_status.empty()
+                                ? "REFERENCE_ONLY"
+                                : entry.workflow_status.c_str());
+        ImGui::TextDisabled("source: %s", entry.source_evidence_script_path.c_str());
+        if (!added) {
+          if (ImGui::Button("Add to Current Evidence List")) {
+            m_manualTest.selected_hidden_evidence_case_keys.insert(key);
+            m_manualTest.operator_hidden_evidence_case_keys.erase(key);
+            m_manualTest.script_evidence_groups_dirty = true;
+            m_manualTest.script_evidence_row_refs_dirty = true;
+            m_manualTest.debug_status = "HIDDEN_EVIDENCE_CASE_QUEUED";
+            m_manualTest.debug_reason = "queued case=" + entry.case_id +
+                                        " source=" + entry.source_evidence_script_path;
+            CXLOG_INFO("EvidenceChain", "hidden_case_add", "queued",
+                       m_manualTest.debug_reason);
+          }
+        } else {
+          ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f),
+                             "IN CURRENT LIST");
+          ImGui::SameLine();
+          if (ImGui::Button("Remove from Current List")) {
+            m_manualTest.selected_hidden_evidence_case_keys.erase(key);
+            m_manualTest.operator_hidden_evidence_case_keys.insert(key);
+            m_manualTest.script_evidence_groups_dirty = true;
+            m_manualTest.script_evidence_row_refs_dirty = true;
+            m_manualTest.debug_status = "HIDDEN_EVIDENCE_CASE_REMOVED";
+            m_manualTest.debug_reason = "removed case=" + entry.case_id;
+            CXLOG_INFO("EvidenceChain", "hidden_case_remove", "queued",
+                       m_manualTest.debug_reason);
+          }
+        }
+        ImGui::Separator();
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndChild();
+    ImGui::TextDisabled("Catalog matches: %d | active additions: %zu", shown,
+                        m_manualTest.selected_hidden_evidence_case_keys.size());
+  }
+
   if (m_manualTest.script_evidence_groups.empty()) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
                        "No trace binding thumbnails.");
@@ -15327,6 +15478,40 @@ void ViewController::DrawOneScriptEvidenceRow(int groupIndex, int thumbIndex,
     }
 
     ImGui::Separator();
+
+    // This is the inverse of the metadata-only Add Hidden Evidence Case
+    // catalog action. It only changes the active queue membership; it never
+    // deletes a case directory, manifest, overlay, or source image.
+    const std::string hiddenCaseKey =
+        thumb.source_evidence_script_path.empty() || thumb.case_id.empty()
+            ? std::string()
+            : std::filesystem::path(thumb.source_evidence_script_path)
+                  .lexically_normal()
+                  .generic_string() +
+                  "::" + thumb.case_id;
+    const bool canHideEvidenceCase =
+        !hiddenCaseKey.empty() &&
+        m_manualTest.selected_hidden_evidence_case_keys.find(hiddenCaseKey) !=
+            m_manualTest.selected_hidden_evidence_case_keys.end();
+    if (canHideEvidenceCase && ImGui::MenuItem("Hide Evidence Case")) {
+      m_manualTest.selected_hidden_evidence_case_keys.erase(hiddenCaseKey);
+      m_manualTest.operator_hidden_evidence_case_keys.insert(hiddenCaseKey);
+      m_manualTest.selected_evidence_group = -1;
+      m_manualTest.selected_evidence_thumb = -1;
+      m_manualTest.current_evidence_selection = CxEvidenceSelectionSnapshot{};
+      m_manualTest.script_evidence_groups_dirty = true;
+      m_manualTest.script_evidence_row_refs_dirty = true;
+      m_manualTest.debug_status = "HIDDEN_EVIDENCE_CASE_REMOVED";
+      m_manualTest.debug_reason = "hidden from current Evidence list: case=" +
+                                  thumb.case_id + " source=" +
+                                  thumb.source_evidence_script_path;
+      CXLOG_INFO("EvidenceChain", "hidden_case_remove", "queued",
+                 m_manualTest.debug_reason);
+      rowStateReplaced = true;
+      ImGui::CloseCurrentPopup();
+    }
+    if (canHideEvidenceCase)
+      ImGui::Separator();
 
     if (ImGui::MenuItem("Load This Image To Image View")) {
       const std::string thumbImagePathBeforeLoad = thumb.image_path;

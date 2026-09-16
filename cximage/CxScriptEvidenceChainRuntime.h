@@ -42,6 +42,7 @@ struct CxScriptEvidenceCase
     std::string tool;
     std::string level;
     std::string case_role;
+    std::string display_name;
     std::string source_case_id;
     std::string display_category;
     std::string display_group;
@@ -76,6 +77,9 @@ struct CxScriptEvidenceCase
     std::string failure_samples_ref;
     std::vector<CxScriptEvidenceDatasetImage> dataset_images;
     std::vector<CxScriptEvidenceAnnotation> annotations;
+    // Asset-declared initial membership of the small manual Evidence queue.
+    // False means catalog-only until an operator explicitly adds the case.
+    bool manual_visible = false;
     bool manual_review_required = true;
     bool promotion_candidate = false;
 };

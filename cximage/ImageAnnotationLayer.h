@@ -41,6 +41,7 @@ enum class ImageToolMode
   CircleCreate,
   EllipseCreate,
   PolylineCreate,
+  MagicWandBoundary,
   AutoBoundary,
   AttachToScript
 };

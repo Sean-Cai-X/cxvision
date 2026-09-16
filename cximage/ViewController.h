@@ -408,6 +408,17 @@ public:
     bool CommitDraftShapeFromTool(
         const AnnotationToolDefinition& tool,
         CxImagePointerResult& out);
+    bool BuildMagicWandPreview(double imageX, double imageY,
+                               std::string& reason);
+    bool BuildMagicWandFormFitNodes(const std::vector<cv::Point>& contour,
+                                    std::string& reason);
+    bool CommitMagicWandPreview(CxImagePointerResult& out);
+    bool WriteBusinessAnnotationReceipt(
+        const CxShapeElement& element, const AnnotationToolDefinition& tool,
+        const std::string& operation, const std::string& status,
+        const std::string& trace, std::string& receiptPath,
+        std::string& reason) const;
+    void ClearMagicWandPreview(const std::string& status);
 
     bool IsMouseInsideImageCanvas(const ImVec2& p) const;
     static const char* ImageToolModeName(ImageToolMode mode);
@@ -680,6 +691,25 @@ private:
 
     int m_activePolylineElement = -1;
     std::vector<CxShapePoint> m_activePolylinePoints;
+    // A local, deterministic boundary proposal.  This intentionally remains
+    // separate from FindSegmentation/EdgeSam: it uses only the loaded image
+    // and a human-selected seed point, then requires an explicit accept.
+    std::vector<CxShapePoint> m_magicWandPreviewPoints;
+    std::vector<CxShapePoint> m_magicWandRawBoundaryPoints;
+    OverlayImagePoint m_magicWandSeed;
+    int m_magicWandAlgorithm = 0;
+    int m_magicWandColorTolerance = 24;
+    bool m_magicWandEightConnected = true;
+    float m_magicWandSimplifyPixels = 1.5f;
+    int m_magicWandMinimumRegionPixels = 32;
+    int m_magicWandNodeizationMode = 0;
+    int m_magicWandMaximumNodes = 64;
+    float m_magicWandMinimumNodeSpacingPixels = 4.0f;
+    int m_magicWandRegionPixels = 0;
+    int m_magicWandRawBoundaryPointCount = 0;
+    int m_magicWandFormFitNodeCount = 0;
+    std::string m_magicWandStatus = "MAGIC_WAND_IDLE";
+    std::string m_magicWandFormFitStatus = "FORMFIT_NODE_IDLE";
     bool m_attachToScriptMode = false;
     bool m_showSourcePreviewOverlay = false;
     ImageToolMode m_imageToolMode = ImageToolMode::PointerPan;

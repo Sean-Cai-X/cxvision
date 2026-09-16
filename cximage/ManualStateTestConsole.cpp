@@ -2066,7 +2066,78 @@ void ViewController::drawKeyParameterControlsWindow() {
     m_manualTest.current_gauge = liveGauge;
     m_manualTest.runtime_int_vars = liveGlobals;
   }
-  if (IsTorchContext(m_manualTest) &&
+  const AnnotationToolDefinition *activeAnnotationTool =
+      m_annotationLayer.ActiveTool();
+  const bool magicWandActive = activeAnnotationTool != nullptr &&
+                               activeAnnotationTool->action ==
+                                   "magic_wand_boundary";
+  if (magicWandActive) {
+    ImGui::TextUnformatted("Magic Wand Boundary — Key Parameter Controls");
+    ImGui::TextDisabled(
+        "Default flow: local region boundary → FormFit geometry nodes → editable closed polygon.");
+    ImGui::SeparatorText("Boundary extraction");
+    bool parametersChanged = false;
+    const char *algorithmOptions[] = {
+        "Color fixed range (default)", "Connected color range"};
+    parametersChanged |= ImGui::Combo("Algorithm##key_magic_wand",
+                                      &m_magicWandAlgorithm, algorithmOptions,
+                                      IM_ARRAYSIZE(algorithmOptions));
+    parametersChanged |= ImGui::SliderInt("Color tolerance##key_magic_wand",
+                                          &m_magicWandColorTolerance, 0, 128);
+    parametersChanged |= ImGui::Checkbox("8-connected region##key_magic_wand",
+                                         &m_magicWandEightConnected);
+    parametersChanged |= ImGui::InputInt("Minimum region pixels##key_magic_wand",
+                                         &m_magicWandMinimumRegionPixels);
+    m_magicWandMinimumRegionPixels =
+        std::clamp(m_magicWandMinimumRegionPixels, 3, 1000000);
+
+    ImGui::SeparatorText("FormFit key-node extraction");
+    const char *nodeizationOptions[] = {
+        "Closed polygon FormFit (default)", "Raw contour nodes (debug)"};
+    parametersChanged |= ImGui::Combo("Nodeization mode##key_magic_wand",
+                                      &m_magicWandNodeizationMode,
+                                      nodeizationOptions,
+                                      IM_ARRAYSIZE(nodeizationOptions));
+    parametersChanged |= ImGui::SliderFloat("Residual (px)##key_magic_wand",
+                                            &m_magicWandSimplifyPixels, 0.0f,
+                                            12.0f, "%.1f");
+    parametersChanged |= ImGui::SliderInt("Maximum nodes##key_magic_wand",
+                                          &m_magicWandMaximumNodes, 3, 256);
+    parametersChanged |= ImGui::SliderFloat("Minimum node spacing (px)##key_magic_wand",
+                                            &m_magicWandMinimumNodeSpacingPixels,
+                                            0.0f, 32.0f, "%.1f");
+    ImGui::Text("Status: %s", m_magicWandStatus.c_str());
+    ImGui::Text("FormFit: %s", m_magicWandFormFitStatus.c_str());
+    ImGui::Text("Raw boundary: %d points | selected geometry: %d nodes",
+                m_magicWandRawBoundaryPointCount, m_magicWandFormFitNodeCount);
+    ImGui::TextDisabled(
+        "Blue trace = raw local contour; green/yellow vertices = FormFit nodes. "
+        "Raw contour mode is diagnostic only.");
+    if (parametersChanged && !m_magicWandPreviewPoints.empty()) {
+      ClearMagicWandPreview("MAGIC_WAND_PREVIEW_STALE_PARAMETERS_CHANGED");
+      m_annotationStatus =
+          "Magic Wand preview discarded because a Key Parameter changed";
+    }
+    if (ImGui::Button("Restore Magic Wand Defaults##key_magic_wand",
+                      ImVec2(-1.0f, 28.0f))) {
+      m_magicWandAlgorithm = 0;
+      m_magicWandColorTolerance = 24;
+      m_magicWandEightConnected = true;
+      m_magicWandSimplifyPixels = 1.5f;
+      m_magicWandMinimumRegionPixels = 32;
+      m_magicWandNodeizationMode = 0;
+      m_magicWandMaximumNodes = 64;
+      m_magicWandMinimumNodeSpacingPixels = 4.0f;
+      ClearMagicWandPreview("MAGIC_WAND_DEFAULTS_RESTORED");
+      m_annotationStatus = "Magic Wand default profile restored";
+      RecordManualOperationTraceEvent(
+          m_manualTest, "magic_wand_default_profile", "restored",
+          "profile=magic_wand_default_v1 algorithm=color_fixed_range_v1 "
+          "tolerance=24 connectivity=8 formfit_residual_px=1.5 "
+          "formfit_mode=closed_polygon_formfit_v1 max_nodes=64 "
+          "minimum_node_spacing_px=4 minimum_region_pixels=32");
+    }
+  } else if (IsTorchContext(m_manualTest) &&
       !IsFindLineFindCircleContext(m_manualTest)) {
     std::string promptSyncReason;
     SyncFindSegmentationPromptListsFromShapeElements(promptSyncReason);

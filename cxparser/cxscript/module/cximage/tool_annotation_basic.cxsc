@@ -38,6 +38,14 @@ CxAnnotationTool_setownerbinding("setrect");
 CxAnnotationTool_setmanualvisible(1);
 CxAnnotationTool_seteditable(1);
 
+CxAnnotationTool_add("magic_wand_boundary");
+CxAnnotationTool_setlabel("Magic Wand Boundary");
+CxAnnotationTool_setshape("PolylineShape");
+CxAnnotationTool_setrole("boundary");
+CxAnnotationTool_setinteraction("magic_wand_boundary");
+CxAnnotationTool_setmanualvisible(1);
+CxAnnotationTool_seteditable(1);
+
 CxAnnotationTool_add("auto_boundary_edgesam");
 CxAnnotationTool_setlabel("Auto Boundary / EdgeSam");
 CxAnnotationTool_setshape("AutoBoundary");
