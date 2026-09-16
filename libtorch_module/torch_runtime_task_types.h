@@ -46,6 +46,11 @@ inline constexpr const char* YoloV8SegBackwardSmoke =
 
 inline constexpr const char* SegmentationTrainingLifecycle =
     "torch.train.segmentation.lifecycle_smoke.v1";
+
+// Business trials are a separate, opt-in capability.  They are not an alias
+// for the smoke task and are never a production activation capability.
+inline constexpr const char* SegmentationBusinessIncremental =
+    "torch.train.segmentation.business_incremental.v1";
 }
 
 enum class TorchProductionTaskKind

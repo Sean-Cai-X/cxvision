@@ -23,10 +23,13 @@ TorchTaskResultCpp RunYoloV8TrainingLifecycleTask(
 #include "torch_test_host.h"
 #include <chrono>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <limits>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <sstream>
@@ -103,6 +106,23 @@ std::string ExtractRuntimeTaskJsonString(
     if (end == std::string::npos)
         return {};
     return json.substr(pos + 1, end - pos - 1);
+}
+
+bool ExtractRuntimeTaskJsonInt(const std::string& json, const std::string& key, int& value)
+{
+    const std::string marker = "\"" + key + "\"";
+    std::size_t pos = json.find(marker);
+    if (pos == std::string::npos) return false;
+    pos = json.find(':', pos + marker.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos]))) ++pos;
+    const char* begin = json.c_str() + pos;
+    char* end = nullptr;
+    const long parsed = std::strtol(begin, &end, 10);
+    if (end == begin || parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max()) return false;
+    value = static_cast<int>(parsed);
+    return true;
 }
 
 torch::Tensor MakeSegmentationLifecycleImages(
@@ -627,6 +647,7 @@ std::vector<std::filesystem::path> CollectSegmentationLifecycleImages(
 bool BuildEvidenceImageBatch(
     const std::vector<EvidenceDatasetImage>& evidence_images,
     SegmentationMainlineRunnerConfig& config,
+    const int target_class_id,
     torch::Tensor& images,
     torch::Tensor& masks,
     double& mask_foreground_ratio,
@@ -668,30 +689,25 @@ bool BuildEvidenceImageBatch(
         image_tensors.push_back(image_tensor);
 
         cv::Mat binary;
-        if (!evidence.mask_path.empty())
+        if (evidence.mask_path.empty())
         {
-            cv::Mat source_mask =
-                cv::imread(evidence.mask_path.string(), cv::IMREAD_GRAYSCALE);
-            if (source_mask.empty())
-            {
-                image_tensors.pop_back();
-                continue;
-            }
-            cv::resize(
-                source_mask,
-                binary,
-                cv::Size(config.input_size, config.input_size),
-                0.0,
-                0.0,
-                cv::INTER_NEAREST);
-            cv::threshold(binary, binary, 0, 1, cv::THRESH_BINARY);
+            // BBox or threshold-derived masks are visualization aids only.
+            // They must not silently become segmentation supervision.
+            return false;
         }
-        else
-        {
-            binary = MakeMaskFromEvidenceBboxes(
-                evidence,
-                config.input_size);
-        }
+        cv::Mat source_mask =
+            cv::imread(evidence.mask_path.string(), cv::IMREAD_GRAYSCALE);
+        if (source_mask.empty())
+            return false;
+        cv::resize(
+            source_mask,
+            binary,
+            cv::Size(config.input_size, config.input_size),
+            0.0,
+            0.0,
+            cv::INTER_NEAREST);
+        cv::compare(binary, target_class_id, binary, cv::CMP_EQ);
+        binary /= 255;
         foreground_pixels += static_cast<double>(cv::countNonZero(binary));
         total_pixels += static_cast<double>(binary.rows * binary.cols);
         auto mask_tensor = torch::from_blob(
@@ -724,6 +740,7 @@ bool BuildEvidenceImageBatch(
 bool BuildSegmentationLifecycleRealImageBatch(
     const TorchTaskRequestCpp& request,
     SegmentationMainlineRunnerConfig& config,
+    const int target_class_id,
     torch::Tensor& images,
     torch::Tensor& masks,
     torch::Tensor& eval_images,
@@ -769,6 +786,7 @@ bool BuildSegmentationLifecycleRealImageBatch(
         if (!BuildEvidenceImageBatch(
                 train_images,
                 config,
+                target_class_id,
                 images,
                 masks,
                 mask_foreground_ratio,
@@ -782,13 +800,13 @@ bool BuildSegmentationLifecycleRealImageBatch(
         if (!BuildEvidenceImageBatch(
                 validation_images.empty() ? train_images : validation_images,
                 config,
+                target_class_id,
                 eval_images,
                 eval_masks,
                 eval_mask_foreground_ratio,
                 eval_image_hash))
         {
-            eval_images = images.clone();
-            eval_masks = masks.clone();
+            return false;
         }
         if (eval_images.defined() && eval_images.size(0) == 1)
         {
@@ -812,6 +830,10 @@ bool BuildSegmentationLifecycleRealImageBatch(
             artifacts);
         return true;
     }
+
+    // A directory of arbitrary images has no immutable split membership or
+    // accepted masks.  Do not derive supervision from pixels as a fallback.
+    return false;
 
     image_paths = CollectSegmentationLifecycleImages(request, 4);
     if (image_paths.empty())
@@ -913,6 +935,34 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
     {
         torch::manual_seed(deterministic_seed);
 
+        const bool business_incremental =
+            request.task == TorchRuntimeTaskIds::SegmentationBusinessIncremental;
+        int target_class_id = 1;
+        int requested_epochs = 1;
+        if (business_incremental)
+        {
+            TORCH_CHECK(
+                ExtractRuntimeTaskJsonInt(request.extra_json, "target_class_id", target_class_id) &&
+                target_class_id >= 0 && target_class_id <= 6,
+                "business segmentation requires target_class_id in [0,6]");
+            TORCH_CHECK(
+                !ExtractRuntimeTaskJsonString(request.extra_json, "parent_weights").empty(),
+                "business segmentation requires a versioned parent_weights artifact");
+            TORCH_CHECK(
+                ExtractRuntimeTaskJsonInt(request.extra_json, "epochs", requested_epochs) &&
+                requested_epochs >= 2 && requested_epochs <= 200,
+                "business segmentation requires epochs in [2,200]");
+            const std::filesystem::path trial_output(request.output_dir);
+            const bool trial_root = std::find(
+                trial_output.begin(), trial_output.end(),
+                std::filesystem::path("development_trials")) != trial_output.end() ||
+                std::find(trial_output.begin(), trial_output.end(),
+                          std::filesystem::path("isolated_business_validation")) != trial_output.end();
+            TORCH_CHECK(
+                !request.output_dir.empty() && trial_root,
+                "business segmentation output must remain under development_trials or isolated_business_validation");
+        }
+
         auto runner_config =
             make_segmentation_mainline_runner_config(
                 "deeplabv3plus",
@@ -935,6 +985,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         if (!BuildSegmentationLifecycleRealImageBatch(
                 request,
                 runner_config,
+                target_class_id,
                 train_images,
                 train_masks,
                 eval_images,
@@ -947,15 +998,9 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
                 lifecycle_mask_source,
                 lifecycle_artifacts))
         {
-            train_images = MakeSegmentationLifecycleImages(runner_config);
-            train_masks = MakeSegmentationLifecycleMasks(runner_config);
-            eval_images = train_images.clone();
-            eval_masks = train_masks.clone();
-            lifecycle_image_count = static_cast<int>(train_images.size(0));
-            lifecycle_eval_image_count = static_cast<int>(eval_images.size(0));
-            lifecycle_mask_foreground_ratio = train_masks.gt(0).to(torch::kFloat32).mean().item<double>();
-            lifecycle_image_hash = "synthetic_seed_1023";
-            lifecycle_mask_source = "synthetic_random";
+            TORCH_CHECK(false,
+                "segmentation lifecycle requires a manifest-bound train and validation image/mask dataset; "
+                "synthetic, bounding-box, and image-threshold supervision are disabled");
         }
 
         const torch::Device device =
@@ -981,31 +1026,33 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
                 .weight_decay(runner_config.optimizer.weight_decay));
         train_images = train_images.to(device);
         train_masks = train_masks.to(device, torch::kLong);
-        optimizer.zero_grad();
-        torch::Tensor train_logits =
-            trained_model->forward(train_images).at("out");
-        torch::Tensor train_loss =
-            torch::nn::functional::cross_entropy(train_logits, train_masks);
-        TORCH_CHECK(
-            torch::isfinite(train_loss).item<bool>(),
-            "persistent segmentation training loss is not finite");
-        train_loss.backward();
-
+        torch::Tensor train_loss;
         double grad_mean = 0.0;
         bool has_grad = false;
-        for (const torch::Tensor& parameter : trained_model->parameters())
+        for (int epoch = 0; epoch < requested_epochs; ++epoch)
         {
-            if (parameter.grad().defined())
+            optimizer.zero_grad();
+            torch::Tensor train_logits =
+                trained_model->forward(train_images).at("out");
+            train_loss = torch::nn::functional::cross_entropy(train_logits, train_masks);
+            TORCH_CHECK(
+                torch::isfinite(train_loss).item<bool>(),
+                "persistent segmentation training loss is not finite");
+            train_loss.backward();
+            for (const torch::Tensor& parameter : trained_model->parameters())
             {
-                grad_mean = parameter.grad().abs().mean().item<double>();
-                has_grad = true;
-                break;
+                if (parameter.grad().defined())
+                {
+                    grad_mean = parameter.grad().abs().mean().item<double>();
+                    has_grad = true;
+                    break;
+                }
             }
+            TORCH_CHECK(
+                has_grad,
+                "persistent segmentation training produced no gradients");
+            optimizer.step();
         }
-        TORCH_CHECK(
-            has_grad,
-            "persistent segmentation training produced no gradients");
-        optimizer.step();
 
         trained_model->eval();
         eval_images = eval_images.to(device);
@@ -1100,7 +1147,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
                 << "\"schema\":\"cxvision.torch_model_manifest\","
                 << "\"schema_version\":1,"
                 << "\"model_id\":\"deeplab_incremental_"
-                << deterministic_seed << "\","
+                << deterministic_seed << "_class_" << target_class_id << "\","
                 << "\"parent_model_id\":\""
                 << (parent_weights.empty()
                         ? "random_initialization"
@@ -1112,6 +1159,8 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
                 << "\"weights\":\"weights/deeplab_incremental.pt\","
                 << "\"weights_format\":\"cpp_state_dict\","
                 << "\"num_classes\":2,"
+                << "\"target_geometry_class_id\":" << target_class_id << ","
+                << "\"trial_state\":\"CANDIDATE\","
                 << "\"model_name\":\"deeplab_incremental\","
                 << "\"model_version\":\"incremental-1\","
                 << "\"input\":{"
@@ -1138,7 +1187,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         result.error_code = 0;
         result.status = "success";
         result.trainer_lifecycle_summary =
-            "persistent model instance completed optimizer step and evaluation";
+            "persistent model instance completed manifest-bound epoch training and evaluation";
         result.unified_mainline_summary =
             "incremental cpp_state_dict and model manifest exported";
         if (!inference_overlay_path.empty())
@@ -1183,7 +1232,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
         result_json << "\"mask_preview_ref\":" << QuoteRuntimeTaskJsonString(lifecycle_artifacts.mask_preview_ref) << ",";
         result_json << "\"bbox_overlay_ref\":" << QuoteRuntimeTaskJsonString(lifecycle_artifacts.bbox_overlay_ref) << ",";
         result_json << "\"train_runtime_ms\":" << result.train_runtime_ms << ",";
-        result_json << "\"effective_epochs\":1,";
+        result_json << "\"effective_epochs\":" << requested_epochs << ",";
         result_json << "\"effective_batch_size\":" << runner_config.batch_size << ",";
         result_json << "\"input_size\":" << runner_config.input_size << ",";
         result_json << "\"smoke_loss\":" << smoke.loss << ",";
@@ -1241,7 +1290,7 @@ TorchTaskResultCpp RunSegmentationTrainingLifecycleTask(
             evidence << "\"split_summary_ref\":" << QuoteRuntimeTaskJsonString(lifecycle_artifacts.split_summary_ref) << ",";
             evidence << "\"mask_preview_ref\":" << QuoteRuntimeTaskJsonString(lifecycle_artifacts.mask_preview_ref) << ",";
             evidence << "\"bbox_overlay_ref\":" << QuoteRuntimeTaskJsonString(lifecycle_artifacts.bbox_overlay_ref) << ",";
-            evidence << "\"epochs\":1,";
+            evidence << "\"epochs\":" << requested_epochs << ",";
             evidence << "\"batch_size\":" << runner_config.batch_size << ",";
             evidence << "\"input_size\":" << runner_config.input_size << ",";
             evidence << "\"finite_loss\":true,";
@@ -2506,8 +2555,8 @@ TorchTaskResultCpp DispatchTorchRuntimeTask(
         return ExecuteTorchYoloV8SegBackwardSmokeTask(config, request);
     }
 
-    if (request.task ==
-        TorchRuntimeTaskIds::SegmentationTrainingLifecycle)
+    if (request.task == TorchRuntimeTaskIds::SegmentationTrainingLifecycle ||
+        request.task == TorchRuntimeTaskIds::SegmentationBusinessIncremental)
     {
         return RunSegmentationTrainingLifecycleTask(
             config,
