@@ -1,0 +1,2524 @@
+对于 “实现几何回归头的训练和验证” 中，让模型本身成为一个 “旋转等变网络，以解决几何头的旋转问题，因此 G-CNNs 需要引入，
+实现等变性的主流方法是使用群等变卷积网络 (Group Equivariant CNNs, G-CNNs)，
+Steerable CNNs 或
+Steerable CNNs 或
+E (2) CNNs 或
+E (2) CNNs
+替换或增强 YOLOv8 的核心卷积层，使用 G-CNN 模块。
+G-CNNs 的滤波器本身就被设计成 “旋转群” 的成员。这意味着，一个卷积滤波器在图像旋转时，其权重和输出特征图也会以预定的方式旋转。这使得特征图本身就 “携带了旋转信息”。
+模型在推理时，由于特征图已经编码了旋转信息， 不需要一个额外的 MLP 去 “猜” 角度，而是可以设计一个特殊的**“角点提取层 (Angular Extraction Head)”**，给出对应的这部分的流程和推进
+
+G-CNN 是「模型姿态感知的底层升级」，不是「最终计量的替代方案」
+
+它解决的是 YOLOv8 原生卷积特征本身不具备旋转等变性的根问题——之前 OBB 旋转漂移，本质是普通 CNN 里“同一个物体转一下，特征图就完全变了”，角度只能靠回归头从特征里统计拟合，本质是“猜角度”；G-CNN 的滤波器本身就是旋转群的一部分，物体旋转时特征图按群规律同步旋转，特征里天然编码了旋转信息，角度是从特征里“解码”出来的，不是“猜”出来的。
+
+但它仍然属于Level 3 模型感知层的粗姿态输出，是给 FastMatch 提供更准的搜索初值、更小的搜索范围，最终计量精度、边缘证据、几何闭合仍然由 Normal Trace + FormFit 兜底，不突破五级边界链的分工。相当于给“小钢炮”换了一个更精准的瞄准镜，不是换掉炮管本身。
+
+一、G-CNN 解决旋转问题的底层逻辑
+
+1. 原生 OBB 旋转漂移的根因
+
+普通 CNN 的卷积核是固定朝向的：
+
+一个 3×3 卷积核只对特定朝向的边缘响应最强；
+
+目标旋转 30°，特征图的激活分布、特征向量完全改变；
+
+OBB 回归头只能靠“见过大量旋转样本”拟合出「特征分布 → 角度值」的映射，本质是统计插值，没有几何必然性。
+
+一旦遇到训练集没覆盖的角度、边缘模糊、局部遮挡，统计拟合立刻失稳，角度漂移、轴互换都是必然结果。
+
+2. G-CNN 的等变特性：从根上消除旋转漂移
+
+群等变卷积的核心是滤波器本身构成旋转群：
+
+离散 G-CNN：用一组按固定角度（如 15°/30°）旋转的滤波器构成卷积核群，目标旋转 α，输出特征图的通道维度也同步旋转 α，特征响应的相对分布不变；
+
+连续 E(2)-CNN：用可旋转的 steerable 滤波器（如谐波核）实现连续旋转等变，角度可以任意精度解码。
+
+最终效果：同一个物体，不管转多少度，特征空间的相对结构完全一致，只是整体发生了群变换。角度信息不再需要靠回归头“猜”，而是直接编码在特征的群结构里。
+
+二、架构嵌入方案：最小侵入替换 + 独立角度提取头
+
+不推翻 YOLOv8-Seg 的现有骨架，采用「关键层替换 + 并行角度头」的方式嵌入，保留原有分割、检测能力，新增原生旋转等变的几何姿态输出。
+
+1. 卷积层替换策略：只换核心特征层，不全部重构
+
+优先替换对边缘、形状敏感的中高层卷积，底层纹理卷积保留，兼顾效果和成本：
+
+网络部分 替换策略 原因 
+
+Backbone 底层（P1/P2）
+
+不替换，保留普通 CNN
+
+底层提取纹理、梯度、明暗等基础特征，旋转敏感性低，替换收益小
+
+Backbone 中高层（P3/P4/P5）
+
+C2f 模块中的 3×3 卷积替换为 G-Conv
+
+中高层提取轮廓、形状、部件结构，旋转敏感性最高，是等变特性的核心生效层
+
+Neck（PAN/FPN）
+
+上采样/下采样保留，融合卷积替换为 G-Conv
+
+多尺度融合层保持特征的旋转一致性，避免跨尺度融合破坏等变特性
+
+分割头 / 检测头
+
+主体保留，新增并行角度提取分支
+
+原有分类、Mask、Box 分支不动，新增独立的 Angular Extraction Head
+
+工程化选择：第一阶段优先用离散 G-CNN（12 方向 / 24 方向），步长 30°/15°，工程实现简单、计算量可控；连续 Steerable CNN 留作第二阶段高精度方案。
+
+2. 角点提取层（Angular Extraction Head）设计
+
+核心思路：不做回归，做群特征解码，从 G-Conv 输出的群特征图中直接提取角度，输出带置信度的粗姿态。
+
+（1）离散 G-CNN 版本（首推工程落地）
+
+输入：G-Conv 输出的群特征图 [B, C*K, H, W]
+                          K=旋转群阶数（如12/24）
+                          每个通道组对应一个旋转角度
+    ↓
+1. 实例对齐池化
+    按实例 Mask 裁剪特征，做区域平均池化，得到每个实例的群特征向量 [B, N, C*K]
+    （N 为实例数）
+    ↓
+2. 群响应峰值检测
+    沿 K 维度做 softmax，得到角度响应分布 [B, N, K]
+    取峰值对应的角度 bin 作为粗角度 θ0
+    ↓
+3. 亚角度插值
+    用峰值相邻两个 bin 的响应强度做二次插值，得到亚步长精度角度 θ
+    （15°步长可插值到 1°以内精度）
+    ↓
+4. 辅助几何参数
+    结合对应角度通道的特征，解码粗尺寸（长短轴/半径）、中心偏移
+    ↓
+输出：每个实例的 coarse_pose {center_x, center_y, angle, size_a, size_b, angle_confidence}
+
+（2）连续 E(2)-CNN 版本（高阶方案）
+
+用 steerable 滤波器的相位信息直接解码连续角度：
+
+利用谐波滤波器的旋转相位不变性，从特征的相位响应中直接计算连续旋转角；
+
+角度精度理论上无步长限制，但计算复杂度更高，对硬件友好度不如离散方案。
+
+3. 和现有链路的对接
+
+并行输出：和原有检测头、分割头并行，共享 G-CNN 增强后的骨干特征，不破坏原有链路；
+
+状态对齐：输出的 coarse_pose 完全对齐之前定义的「模型感知层粗姿态」格式，直接作为 FastMatch 的搜索初始化输入；
+
+置信度分级：角度置信度低于阈值时，自动回退到原有 Mask 转最小外接矩形的方案，保证链路不中断。
+
+三、训练与验证体系：对齐三级监督梯度
+
+完全贴合之前的三级标注约束，分层注入监督，从粗到精逐级打磨角度精度。
+
+1. 训练阶段：三级监督对应三级目标
+
+训练阶段 监督标注 对应损失 训练目标 
+
+预训练阶段
+
+Magic Wand 粗标 + 全角度旋转增广
+
+分割损失 + 分类损失 + 群一致性损失
+
+让 G-CNN 先学会旋转等变的特征提取，保证“转得动、特征对”
+
+精调阶段
+
+FormFit 几何精标
+
+角度交叉熵损失 + 尺寸平滑L1损失 + 几何一致性损失
+
+训练角度提取头，把群特征解码到准确的工程角度
+
+校准阶段
+
+Normal Trace 点云真值
+
+亚角度损失 + 法线方向一致性损失
+
+校准角度偏移，把模型输出和计量级边缘对齐
+
+核心损失函数设计
+
+L_total = λ_seg * L_mask          # 分割损失（原有）
+        + λ_cls * L_cls           # 分类损失（原有）
+        + λ_group * L_group        # 群等变一致性损失（新增）
+        + λ_ang * L_angular       # 角度解码损失（新增）
+        + λ_geo * L_geo_consist  # 几何一致性损失（新增）
+
+群等变损失 L_group：保证输入旋转α，特征图的群响应也同步旋转α，是 G-CNN 的基础约束；
+
+角度解码损失 L_angular：监督角度峰值的位置和分布，用 FormFit 标注的角度做真值；
+
+几何一致性损失 L_geo_consist：约束角度和尺寸、Mask 轮廓的几何匹配关系，避免角度和轮廓脱节。
+
+2. 验证体系：三级 Gate 验证
+
+不和自己比，和计量级基准对标，逐级验证：
+
+G1 合成样本验证（必过 Gate）
+
+用受控几何生成器生成 0°~360° 全角度、多尺度、多干扰的标准样本（圆、椭圆、矩形）；
+
+验证指标：角度 MAE、尺寸 MAE、角度误差的标准差（衡量稳定性）；
+
+合格标准：全角度范围内角度误差 < 1°，尺寸误差 < 0.5px，误差波动远小于原生 OBB。
+
+G2 真实样本对标验证
+
+用 FormFit 精标 + Normal Trace 计量结果做真值；
+
+对比原生 OBB、G-CNN 角度头、FastMatch 兜底三者的结果；
+
+验证指标：旋转鲁棒性（不同角度下的精度衰减）、遮挡鲁棒性、低对比度鲁棒性；
+
+核心验证：G-CNN 输出的粗姿态，能不能让 FastMatch 的收敛速度更快、失败率更低、搜索范围缩小多少。
+
+G3 端到端链路验证
+
+完整走通「G-CNN 粗姿态 → FastMatch 初始化 → Normal Trace 边缘搜索 → FormFit 几何拟合 → 计量输出」全链路；
+
+验证最终计量精度、重复性、通过率；
+
+确认：G-CNN 的引入是提升了全链路性能，而不是降低了可解释性、引入了新的黑箱。
+
+关键边界与定位
+
+定位：G-CNN 几何头永远是「粗姿态预测」，不是最终计量结果。最终精度、边缘证据、合格判定，仍然由 Normal Trace + FormFit + Predictive Gate 负责，不突破五级边界链。
+
+边界：不替代 FastMatch，是给 FastMatch 更准——初值更准、搜索更快、抗干扰更强，几何精度的底盘仍然是 FastMatch 的闭式求解。
+
+实现：角度是从群特征里按规则解码出来的，有响应分布、有置信度、有峰值来源，可解释、可追溯，不是黑箱回归。
+
+分工：不把“端到端神经网络解决一切”，模型负责把姿态猜得更准，几何负责把量测做稳，分工不变，只是各自升级。
+
+本质上，这还是 FastMatch 的几何硬解，还是模型的特征感知，只是升级成了等变体制，更稳、更准、覆盖角度更广，但核心的逻辑和精度底盘。
+
+也就是说分步推进   先在yolov8 seg 实现验证和测试 后进到CxGeoMetry 模型化与 LibTorch/CUDA 演化基线 ,
+
+ 
+
+# YOLOv8-Seg 旋转等变姿态分支与 CxGeoMetry 衔接推进基线
+
+> **目标**：先在现有 `libtorch_module` 的 YOLOv8-Seg 中验证离散旋转等变特征与角度提取头，再把稳定的粗姿态输出接入 FastMatch / Normal Trace / FormFit；完成应用价值验证后，才进入 CxGeoMetry 的 Tensor 化、LibTorch 化和 CUDA 演化。
+> **核心边界**：G-CNN 提升 Level 3 模型感知层的姿态稳定性；最终量测仍由真实图像边缘、几何拟合、标定和 Predictive Geometry Gate 决定。
+> **禁止事项**：不得把 G-CNN 角度输出直接称为计量角度；不得在 YOLOv8-Seg 尚未完成正确性验证前，把同一能力再次搬入 CxGeoMetry。
+
+---
+
+# 1. 总体结论
+
+这条路线总体成立，但要作三个关键修正。
+
+第一，建议把“角点提取层”统一改称：
+
+```text
+角度提取头
+Angular Extraction Head
+```
+
+“角点”通常指 corner/keypoint，会与几何角点检测混淆。
+
+第二，G-CNN 能提供预定义旋转群下的特征等变性，但不能简单理解为“从此不会发生角度漂移”。离散 `C_N` 网络对群内角度最容易建立结构性等变；任意角度仍会受到图像采样、插值、有限分辨率、遮挡和对称歧义影响。G-CNN 的核心价值是把旋转规律写入网络结构，从而减少模型靠数据自行学习旋转规律的负担，而不是自动获得计量级角度。
+
+第三，不能只把若干普通 `Conv2d` 换成 G-Conv，然后继续任意使用普通卷积、BatchNorm 和通道混合，却仍宣称整个网络保持等变。旋转群特征进入网络后，其群通道必须通过满足群表示约束的卷积、归一化、上采样、拼接和 Head 一直传递到角度解码位置。E(2)-Steerable CNN 的理论同样强调，特征空间的变换规律和卷积核约束必须协同设计。
+
+因此建议分成两步：
+
+```text
+第一步：
+YOLOv8-Seg V2A
+离散 C_N 等变姿态旁路
+→ 最小侵入验证 G-CNN 是否真的提升 FastMatch 初值
+
+第二步：
+YOLOv8-Seg V2B
+中高层 Backbone + Neck 等变化
+→ 在 V2A 价值通过后再扩大改造范围
+```
+
+这比一开始重构整个 YOLOv8-Seg 风险更低，也更容易通过消融实验判断收益来源。
+
+---
+
+# 2. 当前代码的最新准确状态
+
+在开始 G-CNN 前，必须先修正几项已经过期的判断。
+
+## 2.1 当前 Strict Loader 已经改为两阶段原子加载
+
+最新 `load_state_dict_strict()` 已经先检查全部 Key 和 Shape，在 `report.complete()` 通过后才统一执行 `copy_()`；当前代码注释也明确说明失败时要保持 V1 Baseline 不变。因此“严格加载会先部分写入模型”的旧问题，在当前版本中已经修正。
+
+现阶段仍需补的是：
+
+```text
+失败时完整 Mapping Report 落盘
+Expected New Head Keys
+Architecture Hash
+V1 → V2 受控迁移策略
+```
+
+## 2.2 Task-Aligned Assignment 已经进入训练主线
+
+当前 YOLOv8-Seg Executor 已经：
+
+```text
+展开 P3 / P4 / P5 Anchor
+→ 解码 Box
+→ 调用 TaskAlignedAssigner
+→ 获得 assigned_gt_indices
+→ 同一 Assigned GT 用于 Class / Box / DFL / Mask
+```
+
+训练 Trace 也将其标记为：
+
+```text
+dfl_aware_global_task_aligned
+global_p3_p4_p5
+```
+
+。
+
+因此后续不需要重新实现一套 Assignment，而应在现有 `assigned_gt_indices` 基础上继续传播：
+
+```text
+Angle Target
+Geometry Type Target
+Size Target
+Equivariance Target
+```
+
+## 2.3 BCE + Dice 已经进入 Mask Loss
+
+当前 Mask Loss 已经包含：
+
+```text
+BCEWithLogits
++
+Dice
+```
+
+而不是只有 BCE。
+
+下一步重点应是：
+
+```text
+Angle Distribution Loss
+Circular Phase Loss
+Equivariance Consistency
+Pose-Mask Consistency
+Uncertainty Calibration
+```
+
+而不是重复添加 Dice。
+
+## 2.4 Geometry Target 已经能够进入 Tensor
+
+当前 Executor 已经读取：
+
+```text
+primitive_type
+center_x
+center_y
+envelope_width
+envelope_height
+sin(angle)
+cos(angle)
+valid_mask
+```
+
+并转换为 `GeometryTargetTensors`。
+
+但是这些 Tensor 当前只用于记录：
+
+```text
+geometry_target_valid_fields
+geometry_primitive_type_available
+```
+
+并未进入任何 Geometry Head 或 Geometry Loss。当前 `LossTensors` 仍只有：
+
+```text
+class
+box
+dfl
+mask
+```
+
+，代码中也没有 `geometry_loss`、`boundary_loss` 或 `consistency_loss`。
+
+准确状态是：
+
+```text
+Geometry Target 读取              已实现
+Geometry Target Tensor 化         已实现
+Geometry Target 与 Assignment 对齐 部分具备
+Geometry Head                     未实现
+Geometry / Angle Loss             未实现
+```
+
+## 2.5 Controlled Augmentation 已经能离线生成数据集
+
+`CxGeometryReferenceEvaluator` 已经能解析增强计划、固定 Seed、train/validation/holdout Split，并生成 Geometry Augmentation Dataset；但其产物仍明确标记：
+
+```text
+training_enabled = 0
+human_review_required = 1
+PENDING_GEOMETRY_HEAD_BINDING
+```
+
+。
+
+因此：
+
+```text
+离线增强样本生成                  已实现
+增强样本由 Dataset Package 读取     部分具备
+在线随机增强 Pipeline              未看到明确实现
+Clean/Aug Paired Consistency Loss  未实现
+```
+
+## 2.6 当前模型不存在旋转等变模块
+
+当前 YOLOv8-Seg 的主干仍由：
+
+```text
+ConvModule
+C2f
+SPPF
+普通 Upsample / Concat
+普通 Box / Class / Mask / Proto Head
+```
+
+构成；`YoloV8SegRawOutput` 只有 Box、Class、Mask Coefficient 和 Prototype，没有群特征、角度分布或 Coarse Pose。
+
+当前 `ConvModule` 也是标准：
+
+```text
+Conv2d
+BatchNorm2d
+SiLU / ReLU
+```
+
+。
+
+所以 G-CNN 目前确实尚未进入现有模型。
+
+---
+
+# 3. G-CNN 在整个系统中的准确定位
+
+建议正式冻结为：
+
+```text
+G-CNN
+=
+旋转等变粗姿态感知器
+
+FastMatch / Normal Trace
+=
+真实图像边缘观察器
+
+FormFit / Geometry Fit
+=
+确定性几何收敛器
+
+Calibration / Predictive Gate
+=
+量测裁决器
+```
+
+完整链：
+
+```text
+YOLOv8-Seg + G-CNN
+→ Instance Mask
+→ Coarse Pose Distribution
+→ Search ROI / Angle Prior
+→ FastMatch / TransformMatch
+→ Normal Trace
+→ FormFit
+→ Calibration
+→ Predictive Geometry Gate
+→ Measurement Conclusion
+```
+
+当前 `CxPredictiveGeometryGate` 已经区分：
+
+```text
+DirectMeasurement
+ClampedMeasurement
+PredictiveHypothesis
+Undeterminable
+```
+
+因此 G-CNN 结果在没有独立图像边缘证据前，应进入：
+
+```text
+PredictiveHypothesis
+```
+
+而不是直接进入正式量测。
+
+---
+
+# 4. 必须正确处理几何旋转对称性
+
+角度问题不能只按普通 `0°~360°` 分类处理。
+
+不同几何有不同旋转周期：
+
+| 几何        |  有效角度周期 | 说明                |
+| --------- | ------: | ----------------- |
+| 非对称有方向对象  |    360° | `θ` 与 `θ+180°` 不同 |
+| 直线        |    180° | 方向轴等价             |
+| 长方形 / OBB |    180° | 长轴方向等价            |
+| 椭圆        |    180° | 主轴方向等价            |
+| 正方形       |     90° | 四次旋转对称            |
+| 圆         |     无定义 | 不应计算角度损失          |
+| 圆弧        | 可能 360° | 取决于弧起止方向定义        |
+
+所以每个 Geometry Target 应增加：
+
+```text
+orientation_period_deg
+orientation_harmonic_order
+angle_valid
+```
+
+建议关系：
+
+```text
+period 360° → harmonic q = 1
+period 180° → harmonic q = 2
+period 90°  → harmonic q = 4
+circle      → angle_valid = false
+```
+
+否则矩形在 `0°` 与 `180°`、正方形在 `0°` 与 `90°` 会被错误判定为大误差。
+
+---
+
+# 5. 不建议第一步直接重构整个 YOLOv8 主干
+
+用户提出的“只替换 P3/P4/P5 和 Neck 关键卷积”是合理的最终方向，但从严格等变性看，仍有一个问题：
+
+```text
+普通 P1/P2 特征
+→ 进入 G-Conv
+```
+
+并不能自动保证整个上游输入具有明确的群表示，因此只能获得“增强的旋转感知”，未必获得严格的端到端等变保证。
+
+同时，如果 G-Conv 后又接普通的任意通道混合卷积，群通道的旋转置换规律会被破坏。
+
+因此建议先实现 V2A，再实现 V2B。
+
+---
+
+# 6. V2A：离散等变姿态旁路（首个落地版本）
+
+## 6.1 架构
+
+保留当前 YOLOv8-Seg V1 完全不变：
+
+```text
+Input
+→ Existing YOLOv8-Seg
+→ Box / Class / Mask / Proto
+```
+
+并行增加轻量姿态分支：
+
+```text
+Input / Instance ROI
+→ C_N Lifting Conv
+→ C_N Group Blocks
+→ Group Feature Pyramid
+→ Instance Mask Pooling
+→ Angular Extraction Head
+→ Coarse Pose
+```
+
+最终：
+
+```text
+YOLOv8-Seg V1 Output
++
+Equivariant Pose Output
+```
+
+V2A 的优点：
+
+```text
+不破坏 V1 官方权重映射
+不改变当前 Mask / Detection 精度基线
+容易关闭和回滚
+容易验证 G-CNN 是否真的有价值
+可独立统计计算成本
+```
+
+## 6.2 为什么从 Input / ROI 开始
+
+如果等变支路从普通 CNN 的 P3/P4 特征开始，严格等变性已经无法保证。
+
+V2A 建议从：
+
+```text
+原始图像
+```
+
+或：
+
+```text
+按实例 bbox 扩展后的轴对齐 ROI
+```
+
+开始 Lifting。
+
+第一版优先：
+
+```text
+整图低通道 Equivariant Feature Map
++
+预测 Mask 做实例池化
+```
+
+这样同一图中多个实例可以共享一张群特征图。
+
+---
+
+# 7. V2A 核心模块
+
+建议新增：
+
+```text
+libtorch_module/
+├─ torch_cyclic_group_types.h
+├─ torch_cyclic_group_ops.h
+├─ torch_cyclic_group_ops.cpp
+├─ torch_yolov8_seg_equivariant_pose.h
+├─ torch_angular_extraction_head.h
+└─ torch_equivariance_contract_tests.cpp
+```
+
+暂时不要引入新的 Runtime DLL。
+
+继续使用现有：
+
+```text
+torch_runtime_yolov8_seg_executor.cpp
+```
+
+根据 Manifest 的：
+
+```json
+{
+  "architecture": "yolov8seg_equivariant_pose_v2",
+  "rotation_group": "C12"
+}
+```
+
+选择 V1 或 V2。
+
+---
+
+## 7.1 群特征 Tensor
+
+内部统一使用：
+
+```text
+[B, C, K, H, W]
+```
+
+其中：
+
+```text
+B = batch
+C = base channels
+K = rotation group order
+H/W = spatial dimensions
+```
+
+不要长期使用：
+
+```text
+[B, C*K, H, W]
+```
+
+作为逻辑表达。
+
+只有调用普通二维算子时，才临时 reshape。
+
+---
+
+## 7.2 `CyclicLiftConv2d`
+
+职责：
+
+```text
+普通图像特征
+[B, Cin, H, W]
+
+→ K 个旋转群响应
+
+[B, Cout, K, H', W']
+```
+
+参数只保存 Base Kernel。
+
+运行时生成：
+
+```text
+W0
+R(θ1)W0
+R(θ2)W0
+...
+R(θK-1)W0
+```
+
+第一版可使用 ATen：
+
+```text
+affine_grid
+grid_sample
+conv2d
+```
+
+生成旋转 Kernel。
+
+训练阶段每次 Forward 由 Base Kernel 生成全部旋转权重，确保权重共享和梯度回传。
+
+推理阶段可在：
+
+```text
+model.eval()
+weights unchanged
+```
+
+时缓存 Materialized Rotated Kernels。
+
+---
+
+## 7.3 `CyclicGroupConv2d`
+
+输入输出均为：
+
+```text
+[B, C, K, H, W]
+```
+
+核心约束：
+
+```text
+输入旋转一个群元素
+→ 输出群通道循环平移相同元素
+```
+
+第一版可以用 Block-Circulant Weight 构造：
+
+```text
+relative orientation
+g_out^-1 g_in
+```
+
+建立 Group-to-Group 卷积。
+
+不要为每个输出方向训练一套独立 Kernel，否则只是普通多方向卷积，不是 G-CNN。
+
+---
+
+## 7.4 `CyclicBatchNorm`
+
+普通 `BatchNorm2d(C*K)` 会为每个方向学习不同统计和仿射参数，可能破坏群对称。
+
+建议使用：
+
+```text
+[B, C, K, H, W]
+→ BatchNorm3d(C)
+```
+
+使同一个 Base Channel 在全部 Orientation、空间和 Batch 上共享统计与仿射参数。
+
+或者实现显式：
+
+```text
+SharedGroupBatchNorm
+```
+
+要求：
+
+```text
+同一 Base Channel 的 K 个方向共享 gamma / beta
+```
+
+---
+
+## 7.5 Activation
+
+对于离散 `C_N` 的 Regular Representation，群作用主要表现为 Orientation Channel 的循环置换，因此：
+
+```text
+SiLU
+ReLU
+```
+
+等逐点激活可继续使用。
+
+连续 E(2) Irrep 网络则需要更严格的 Gated / Norm Nonlinearity，不能直接照搬离散版本。
+
+---
+
+## 7.6 `CyclicC2f`
+
+第一版建议实现与现有 `YoloV8SegC2f` 对应的 Group 版本：
+
+```text
+Cyclic 1×1 Conv
+→ Orientation-preserving Chunk
+→ Cyclic Bottleneck × N
+→ Channel Concat
+→ Cyclic 1×1 Conv
+```
+
+Concat 只沿：
+
+```text
+Base Channel C
+```
+
+进行，不改变 K 维。
+
+Residual Addition 必须保证两个 Tensor 的：
+
+```text
+K
+orientation convention
+spatial transform convention
+```
+
+完全一致。
+
+---
+
+## 7.7 Group Upsample / Downsample / Concat
+
+```text
+Upsample：
+只缩放 H/W
+不修改 K
+
+Downsample：
+使用 CyclicGroupConv2d stride=2
+
+Concat：
+要求 K 相同
+orientation zero reference 相同
+沿 C 拼接
+```
+
+这三个操作本身不复杂，但一旦 Orientation Convention 不一致，就会产生静默角度偏差。
+
+---
+
+# 8. Angular Extraction Head
+
+## 8.1 第一版输入
+
+```text
+Group Feature Maps:
+P3g [B, C3, K, H3, W3]
+P4g [B, C4, K, H4, W4]
+P5g [B, C5, K, H5, W5]
+
+Instance Masks:
+[B, N, Himg, Wimg]
+```
+
+## 8.2 实例对齐池化
+
+每个实例 Mask Resize 到各尺度：
+
+```text
+M3 / M4 / M5
+```
+
+然后：
+
+```text
+F_instance(c, k)
+=
+Σx,y M(x,y) × F(c,k,x,y)
+/
+Σx,y M(x,y)
+```
+
+得到：
+
+```text
+[B, N, C, K]
+```
+
+P3/P4/P5 可先独立计算，再通过可学习但群共享的尺度权重融合。
+
+训练阶段：
+
+```text
+使用 GT Instance Mask
+```
+
+推理阶段：
+
+```text
+使用 YOLOv8-Seg Predicted Instance Mask
+```
+
+必须在 Evidence 中记录：
+
+```text
+pose_pool_source = gt_mask | predicted_mask
+```
+
+---
+
+## 8.3 群响应得分
+
+不要直接对所有 C 通道简单求和。
+
+建议使用：
+
+```text
+Group-shared 1×1 Projection
+```
+
+即同一组 Channel Weight 应用于每个 Orientation：
+
+```text
+score_k = Σc w_c × F(c,k)
+```
+
+输出：
+
+```text
+[B, N, K]
+```
+
+之后：
+
+```text
+p_k = softmax(score_k / temperature)
+```
+
+---
+
+## 8.4 角度解码
+
+不建议仅使用“最大 Bin + 二次插值”。
+
+更稳妥的方法是循环统计的 Harmonic Moment。
+
+对于群角：
+
+```text
+φ_k = 2πk / K
+```
+
+根据对象对称阶数 `q`：
+
+```text
+z_q = Σk p_k × exp(i q φ_k)
+
+angle =
+arg(z_q) / q
+```
+
+置信度：
+
+```text
+angle_confidence = |z_q|
+```
+
+分布熵：
+
+```text
+angle_entropy = -Σ p_k log(p_k)
+```
+
+Top-2 Gap：
+
+```text
+peak_margin = p_top1 - p_top2
+```
+
+这比普通线性平均更能正确处理：
+
+```text
+0° / 360° 环绕
+180° 对称
+90° 对称
+```
+
+---
+
+## 8.5 角度输出合同
+
+```cpp
+struct CxCoarsePoseHypothesis
+{
+    std::string instance_id;
+    std::string source;
+
+    double center_x = 0.0;
+    double center_y = 0.0;
+
+    double size_a = 0.0;
+    double size_b = 0.0;
+
+    double angle_deg = 0.0;
+    double orientation_period_deg = 360.0;
+
+    double angle_confidence = 0.0;
+    double angle_entropy = 0.0;
+    double peak_margin = 0.0;
+
+    std::vector<double> angle_probabilities;
+    std::vector<double> angle_bins_deg;
+
+    bool predictive_only = true;
+};
+```
+
+其中：
+
+```text
+source = yolov8seg_gcnn_c12
+predictive_only = true
+```
+
+必须固定。
+
+---
+
+# 9. V2B：中高层主干与 Neck 等变化
+
+只有 V2A 证明以下收益后才进入 V2B：
+
+```text
+FastMatch 初始角度更准
+搜索范围明显缩小
+收敛迭代下降
+失败率下降
+全角度稳定性改善
+额外延迟可接受
+```
+
+V2B 才逐步替换：
+
+```text
+Backbone P3 / P4 / P5
+Neck Fusion Blocks
+```
+
+推荐顺序：
+
+```text
+B1：仅 P5 Equivariant
+B2：P4 + P5 Equivariant
+B3：P3 + P4 + P5 Equivariant
+B4：Neck 全部 Group-aware
+```
+
+每一步都保留 V1 分割头进行回归。
+
+不要一次性替换所有中高层。
+
+---
+
+# 10. 现有 YOLO Head 与群特征如何共存
+
+建议保留双出口。
+
+## 10.1 原有检测/分割出口
+
+群特征经过 Orientation Pooling：
+
+```text
+F_invariant = mean(F, dim=K)
+```
+
+或：
+
+```text
+norm pooling
+```
+
+形成普通：
+
+```text
+[B, C, H, W]
+```
+
+继续进入现有：
+
+```text
+Box
+Class
+Mask Coeff
+Proto
+```
+
+Head。
+
+## 10.2 姿态出口
+
+保留完整 K 维：
+
+```text
+Group Feature
+→ Angular Extraction Head
+```
+
+因此：
+
+```text
+分类与 Mask
+→ 使用方向不变特征
+
+姿态
+→ 使用方向等变特征
+```
+
+这符合两类任务的不同需要。
+
+---
+
+# 11. 当前 Weight Transfer 如何调整
+
+当前 V1 的 Strict Loader 已经两阶段原子加载，且存在“分类头受控重初始化”的 Transfer Loader。
+
+V2 需要新增：
+
+```text
+load_state_dict_transfer_equivariant_pose()
+```
+
+分类 Key：
+
+```text
+Shared V1 Keys
+→ 必须严格加载
+
+New Equivariant Pose Keys
+→ 必须明确列为 expected_new_keys
+→ 新初始化
+
+Unexpected Missing Keys
+→ FAIL
+
+Unexpected Shape Mismatch
+→ FAIL
+```
+
+Mapping Report：
+
+```json
+{
+  "shared_loaded_keys": [],
+  "expected_new_equivariant_keys": [],
+  "unexpected_missing_keys": [],
+  "unknown_keys": [],
+  "shape_mismatches": [],
+  "transfer_complete": true
+}
+```
+
+不得将所有新 Head Key 作为普通 Warning 忽略。
+
+---
+
+# 12. 数据合同扩展
+
+当前 Geometry Target 已经能表达：
+
+```text
+center
+envelope size
+sin(angle)
+cos(angle)
+primitive type
+valid mask
+```
+
+。
+
+下一步应扩展为每实例合同，而不是每样本单一 Target：
+
+```cpp
+struct YoloV8SegPoseTarget
+{
+    std::string instance_id;
+
+    int primitive_type = -1;
+
+    float center_x = 0.0f;
+    float center_y = 0.0f;
+
+    float size_a = 0.0f;
+    float size_b = 0.0f;
+
+    float angle_rad = 0.0f;
+    float orientation_period_rad = 2.0f * PI;
+
+    bool angle_valid = false;
+    bool size_valid = false;
+
+    float visibility_ratio = 1.0f;
+    float supervision_weight = 1.0f;
+};
+```
+
+然后用现有：
+
+```text
+assigned_gt_indices
+```
+
+把每个 Positive Anchor 对齐到同一实例的：
+
+```text
+Box
+Mask
+Pose
+Geometry Type
+```
+
+。
+
+---
+
+# 13. 三级标注如何进入训练
+
+## 13.1 Magic Wand
+
+定位：
+
+```text
+弱 Mask 标注
+```
+
+监督：
+
+```text
+Class
+Mask
+Box
+```
+
+不默认监督：
+
+```text
+精确角度
+尺寸
+Geometry Head
+```
+
+除非经过人工或几何工具确认。
+
+建议：
+
+```text
+pose_supervision_weight = 0
+label_quality = weak
+```
+
+---
+
+## 13.2 Prompt FormFit
+
+定位：
+
+```text
+结构化几何强标注
+```
+
+监督：
+
+```text
+Primitive Type
+Center
+Size / Axes
+Angle
+Boundary Shape
+```
+
+这是 Angular Head 和 Geometry Consistency 的主要训练来源。
+
+必须附带：
+
+```text
+review_status
+tolerance
+orientation_period
+uncertainty
+```
+
+---
+
+## 13.3 Normal Trace
+
+定位：
+
+```text
+真实图像边缘观察与计量校准
+```
+
+建议主要用于：
+
+```text
+Angle Bias Calibration
+Boundary Consistency
+FastMatch Initialization Evaluation
+Independent Holdout
+```
+
+不建议把所有 Normal Trace 自动输出直接作为训练真值，否则训练与评价可能共享同一算法偏差。
+
+---
+
+# 14. 损失函数设计
+
+当前已有：
+
+```text
+L_cls
+L_box
+L_dfl
+L_mask_bce
+L_mask_dice
+```
+
+。
+
+新增：
+
+```text
+L_total =
+    L_existing
+  + λ_ang_dist   L_angular_distribution
+  + λ_ang_phase  L_angular_phase
+  + λ_eq         L_equivariance
+  + λ_pose       L_pose_parameter
+  + λ_cons       L_pose_mask_consistency
+  + λ_unc        L_uncertainty_calibration
+```
+
+---
+
+## 14.1 角度分布损失
+
+将 GT Angle 映射成 Wrapped Circular Distribution：
+
+```text
+target_k ∝ exp(κ cos(q(φ_k - θ_gt)))
+```
+
+然后：
+
+```text
+L_angular_distribution
+=
+KL(target || prediction)
+```
+
+或 Circular Cross Entropy。
+
+相比单一 One-Hot Bin，软分布能降低 Bin 边界不连续。
+
+---
+
+## 14.2 相位损失
+
+```text
+L_angular_phase
+=
+1 - cos(q(θ_pred - θ_gt))
+```
+
+其中 `q` 根据对象对称性设置。
+
+---
+
+## 14.3 等变性损失
+
+对于离散群内旋转：
+
+```text
+x_rot = Rotate(x, group_step)
+
+F_rot = ModelFeature(x_rot)
+F_expected = GroupTransform(F(x), group_step)
+
+L_equivariance =
+distance(F_rot, F_expected)
+```
+
+需要明确：
+
+> 架构等变性是主要保证，`L_equivariance` 更适合作为实现一致性检查和离散采样误差正则，不应替代正确的 G-Conv 结构。
+
+群内整数步旋转的误差应非常低；任意角度只要求近似一致。
+
+---
+
+## 14.4 姿态参数损失
+
+```text
+Center：
+SmoothL1
+
+Size：
+SmoothL1 或 relative log loss
+
+Angle：
+Circular Phase Loss
+```
+
+第一阶段不建议同时训练复杂圆弧端点和自由曲线参数。
+
+---
+
+## 14.5 Pose-Mask 一致性
+
+将 Coarse Pose 转换为简化几何 Mask 或主轴方向，与：
+
+```text
+GT Mask
+```
+
+或：
+
+```text
+GT FormFit Boundary
+```
+
+比较。
+
+该损失用于防止：
+
+```text
+角度头预测 30°
+Mask 主轴却明显是 70°
+```
+
+---
+
+## 14.6 不确定度
+
+可先使用：
+
+```text
+angle_confidence = harmonic magnitude
+```
+
+作为无参数置信度。
+
+第二阶段再增加：
+
+```text
+log_kappa
+```
+
+并用 Circular NLL 训练。
+
+---
+
+# 15. 量测保持型增强
+
+## 15.1 几何不变增强
+
+```text
+Brightness
+Gamma
+Noise
+Blur
+Vignetting
+Local Illumination Gradient
+Specular Highlight
+Shadow
+Dust
+Texture Interference
+Compression
+```
+
+只修改图像。
+
+角度和几何 Target 不变。
+
+## 15.2 几何变化增强
+
+```text
+Rotate
+Translate
+Scale
+Flip
+Crop
+Mild Perspective
+```
+
+必须同步修改：
+
+```text
+BBox
+Mask
+Polygon
+Center
+Size
+Angle
+Orientation Period
+Normal / Tangent
+Measurement Ref
+```
+
+## 15.3 Paired Clean/Aug Training
+
+生成：
+
+```text
+Clean Sample
+Augmented Sample
+```
+
+除正常监督外，再比较：
+
+```text
+Clean Pose
+Aug Pose Inverse-transformed Back
+```
+
+形成：
+
+```text
+L_clean_aug_consistency
+```
+
+当前离线增强生成器已经支持固定 Seed 和 Split，但仍需把配对关系、几何变换矩阵和逆变换写入 Dataset Manifest，训练 Executor 才能真正计算一致性 Loss。
+
+---
+
+# 16. Operator 正确性测试
+
+在训练模型前，先测试 G-CNN 算子。
+
+## E0：Lifting Conv Shape
+
+验证：
+
+```text
+Input  [B,C,H,W]
+Output [B,Cout,K,H',W']
+```
+
+并检查 CPU/CUDA Shape 一致。
+
+## E1：离散等变性
+
+输入旋转：
+
+```text
+m × 360° / K
+```
+
+验证：
+
+```text
+F(R_m x)
+≈
+R_m ρ_m F(x)
+```
+
+其中：
+
+```text
+R_m = 空间旋转
+ρ_m = Orientation Channel 循环平移
+```
+
+## E2：Group Conv
+
+对随机输入测试多层 Group Conv 后，等变误差不能随层数明显失控。
+
+## E3：Group Norm / Activation / Upsample / Concat
+
+逐一验证这些操作不会破坏群通道置换关系。
+
+## E4：Angle Decode Wrap-around
+
+测试：
+
+```text
+359° vs 1°
+179° vs 1°（180° 对称）
+89° vs 1°（90° 对称）
+```
+
+## E5：Gradient
+
+确认：
+
+```text
+Angle Loss
+→ Angular Head
+→ Group Conv
+→ Lift Conv
+```
+
+梯度均非零且有限。
+
+## E6：Serialize
+
+保存、重载后：
+
+```text
+Group Order
+Orientation Convention
+Weights
+Angle Output
+```
+
+必须一致。
+
+---
+
+# 17. 训练推进阶段
+
+## Stage A：V1 冻结基线
+
+固定：
+
+```text
+YOLOv8-Seg V1
+Weights Hash
+Dataset Hash
+Inference Results
+Angle Baseline（Mask minAreaRect）
+FastMatch Baseline
+```
+
+## Stage B：V2A Synthetic Overfit
+
+数据：
+
+```text
+受控矩形
+受控椭圆
+受控直线
+非对称零件
+```
+
+要求：
+
+```text
+Angle Distribution Loss 可下降
+Angle Error 明显趋近零
+Circle 自动跳过角度监督
+```
+
+## Stage C：全角度受控数据
+
+覆盖：
+
+```text
+0°~360°
+不同尺度
+不同位置
+不同对比度
+不同模糊和噪声
+```
+
+比较：
+
+```text
+普通 CNN Angle Head
+Mask minAreaRect
+G-CNN Angular Head
+```
+
+## Stage D：FormFit 精标训练
+
+将人工审核 FormFit 角度和尺寸作为强监督。
+
+## Stage E：Normal Trace 校准
+
+主要用于：
+
+```text
+角度系统偏差
+置信度校准
+FastMatch 初值效果
+```
+
+不直接替代独立 Holdout。
+
+## Stage F：Joint Fine-tune
+
+在保证 Mask 不退化前提下，联合优化：
+
+```text
+Mask
+Class
+Box
+Angle
+Pose Consistency
+```
+
+---
+
+# 18. 验证 Gate
+
+## G1：模型等变 Gate
+
+指标：
+
+```text
+Feature Equivariance Error
+Group Shift Accuracy
+Angle Distribution Shift Error
+```
+
+群内旋转必须明显优于普通 CNN Baseline。
+
+## G2：粗姿态精度 Gate
+
+指标：
+
+```text
+Angle MAE
+Angle Median
+Angle P95
+Angle Std
+Catastrophic Error Rate
+Confidence Calibration
+```
+
+必须按对称周期计算误差。
+
+用户提出的：
+
+```text
+角度误差 < 1°
+尺寸误差 < 0.5 px
+```
+
+可以作为研发目标，但在正式写为硬 Gate 前，应先测量：
+
+```text
+FormFit 标注误差
+Normal Trace 重复性
+图像分辨率和边缘噪声下限
+```
+
+否则可能把标注噪声当成模型失败。
+
+## G3：干扰鲁棒性 Gate
+
+比较：
+
+```text
+Clear
+Blur
+Noise
+Low Contrast
+Highlight
+Shadow
+Partial Occlusion
+```
+
+## G4：FastMatch 初始化 Gate
+
+这是最关键的应用 Gate。
+
+记录：
+
+```text
+初始角度误差
+FastMatch 搜索角度范围
+Transform Candidate Count
+FormFit Iteration Count
+Convergence Rate
+Timeout Rate
+Wrong-edge Rate
+Runtime P50 / P95
+```
+
+G-CNN 必须证明：
+
+```text
+搜索范围缩小
+收敛更快
+失败更少
+```
+
+否则即使角度 MAE 改善，也不应进入生产链。
+
+## G5：最终量测 Gate
+
+比较：
+
+```text
+无 G-CNN
+普通 OBB
+G-CNN Coarse Pose
+G-CNN + FastMatch
+```
+
+最终评估：
+
+```text
+中心误差
+角度误差
+尺寸误差
+重复性
+残差
+Support
+Measurement Pass Rate
+```
+
+最终量测必须仍由 FastMatch / Normal Trace / FormFit / Gate 产生。
+
+---
+
+# 19. 当前链路的数据接入
+
+## 19.1 `YoloV8SegRawOutput`
+
+V1 不修改。
+
+新增 V2 输出：
+
+```cpp
+struct YoloV8SegEquivariantPoseOutput
+{
+    std::vector<torch::Tensor> group_features;
+    torch::Tensor orientation_logits;
+    torch::Tensor pose_values;
+    torch::Tensor pose_validity;
+};
+```
+
+V2 总输出：
+
+```cpp
+struct YoloV8SegV2RawOutput
+{
+    YoloV8SegRawOutput segmentation;
+    YoloV8SegEquivariantPoseOutput pose;
+};
+```
+
+避免破坏现有 V1 代码和权重回归。
+
+## 19.2 Runtime Artifact
+
+新增：
+
+```text
+coarse_pose.json
+angle_distribution.json
+equivariance_trace.json
+pose_confidence_calibration.json
+```
+
+## 19.3 Canonical Result
+
+现有实例结果增加：
+
+```text
+coarse_pose
+angle_distribution_ref
+orientation_period_deg
+angle_confidence
+predictive_only
+```
+
+## 19.4 FindSegmentation
+
+每个 Region 绑定：
+
+```text
+instance_id
+mask
+contour
+coarse_pose
+```
+
+不得把 Coarse Pose 转成正式量测值。
+
+---
+
+# 20. FastMatch 对接
+
+## 20.1 Seed 输入
+
+为 FastMatch 增加统一 Seed：
+
+```cpp
+struct FastMatchPoseSeed
+{
+    cv::Point2d center;
+
+    double angle_deg = 0.0;
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+
+    double angle_confidence = 0.0;
+    double angle_std_deg = 180.0;
+
+    std::string source;
+    std::string instance_id;
+};
+```
+
+## 20.2 搜索范围自适应
+
+```text
+高置信度：
+angle_range = ±2σ
+
+中置信度：
+angle_range = ±4σ
+
+低置信度：
+回退 Mask OBB
+或 RotateMatchAB Global Search
+```
+
+不得把 `angle_confidence` 直接等价成固定搜索窗口。
+
+应先通过验证集标定：
+
+```text
+confidence / entropy
+→ 实际 Angle Error Distribution
+```
+
+## 20.3 后续主线
+
+```text
+G-CNN Coarse Pose
+→ transformmatch
+→ Shape Model FormFit
+→ Normal Trace
+→ FormfitGauge
+→ Predictive Gate
+```
+
+对于目标丢失或低置信度：
+
+```text
+RotateMatchAB
+→ Global Reacquisition
+```
+
+---
+
+# 21. 与 CxGeoMetry 的后续衔接
+
+上传材料的核心原则是：
+
+> FastMatch + CxTextInspect 已经构成多尺度显式网络，应从散落 C++ 容器和固定 Route 演化为可版本化、可训练、可校准的 CxGeoMetry 模型；最终模型化发生在这套显式网络内部，而不是依赖外部 YOLO 几何头替代它。
+
+同时，其 LibTorch/CUDA 演化目标是：
+
+```text
+显式模型资产
+→ Tensor 化模型图
+→ 函数式算子
+→ CPU/CUDA/XPU 分发
+→ 学习评分、Route 和描述子
+```
+
+而几何拟合、候选路径和 Evidence 保持显式可解释。
+
+因此 G-CNN 与 CxGeoMetry 的关系必须固定为：
+
+```text
+YOLOv8-Seg G-CNN
+=
+外部粗姿态感知器
+
+CxGeoMetry
+=
+显式几何原型、Route、候选路径和确定性量测系统
+```
+
+G-CNN 不替代 CxGeoMetry。
+
+---
+
+# 22. CxGeoMetry 接入阶段
+
+只有 YOLOv8-Seg G-CNN 完成 G1~G5 后，才开始以下阶段。
+
+## CG0：Coarse Pose Contract 冻结
+
+标准输入：
+
+```text
+center
+angle distribution
+scale prior
+symmetry period
+confidence
+uncertainty
+instance ID
+model version
+```
+
+## CG1：FastMatch Seed Adapter
+
+将 Coarse Pose 转换为：
+
+```text
+RotateMatchAB Candidate
+transformmatch Seed
+Shape Model Initial Transform
+```
+
+并保持 Source Provenance。
+
+## CG2：应用收益验证
+
+固定比较：
+
+```text
+无 Pose Seed
+Mask OBB Seed
+普通 Angle Head Seed
+G-CNN Seed
+```
+
+## CG3：角度分布进入显式候选图
+
+G-CNN 输出的：
+
+```text
+angle bins + probabilities
+```
+
+可以成为 CxGeoMetry Transform Candidate 的 Prior：
+
+```text
+高概率角度
+→ 优先 Route
+
+低概率角度
+→ 延后或裁剪
+```
+
+这与 CxGeoMetry 材料中“Top-K 候选、带权 Route 和分布式参数估计”的演化方向一致。
+
+## CG4：Tensor 化与 CPU 等价
+
+先完成：
+
+```text
+Legacy FastMatch
+vs
+CxGeoMetry CPU Tensor Path
+```
+
+等价验证。
+
+禁止因 G-CNN 已使用 CUDA，就跳过 CxGeoMetry P0 CPU 等价化。
+
+## CG5：CUDA Candidate Batch
+
+利用 G-CNN Pose Distribution 缩小：
+
+```text
+位置
+角度
+尺度
+```
+
+候选范围，然后在 CUDA 中批量执行：
+
+```text
+AB Probe
+Prototype Match
+Route Top-K
+Duplicate Suppression
+```
+
+## CG6：可选 Equivariant Descriptor
+
+只有 CxGeoMetry P0/P1 稳定后，才考虑把小型旋转等变 Descriptor 引入 CxGeoMetry 自身。
+
+此时它只能替换：
+
+```text
+局部特征编码
+```
+
+不能替换：
+
+```text
+显式原型图
+Route
+Geometry Fit
+Evidence
+```
+
+---
+
+# 23. 推荐线程拆分
+
+## Thread A：等变算子基础
+
+负责：
+
+```text
+Cyclic Group Tensor
+Lift Conv
+Group Conv
+Group Norm
+Group C2f
+Operator Equivariance Tests
+```
+
+Gate：
+
+```text
+CPU 群内旋转误差通过
+CUDA 与 CPU 对齐
+```
+
+## Thread B：V2A Pose Branch
+
+负责：
+
+```text
+Group Feature Pyramid
+Mask-aligned Pooling
+Angular Extraction Head
+Coarse Pose Artifact
+```
+
+Gate：
+
+```text
+Synthetic Overfit PASS
+```
+
+## Thread C：Target 与对称合同
+
+负责：
+
+```text
+orientation_period
+harmonic_order
+angle_valid
+per-instance Geometry Target
+Assignment Propagation
+```
+
+Gate：
+
+```text
+多实例 Target 不串位
+```
+
+## Thread D：Angle / Equivariance Loss
+
+负责：
+
+```text
+Circular Distribution
+Phase Loss
+Equivariance Loss
+Pose-Mask Consistency
+Confidence Calibration
+```
+
+## Thread E：Controlled Data
+
+负责：
+
+```text
+全角度数据
+干扰增强
+Clean/Aug Pair
+FormFit 精标
+Normal Trace Holdout
+```
+
+## Thread F：Runtime / Canonical Result
+
+负责：
+
+```text
+V1/V2 Manifest
+Weight Transfer
+Pose Result Schema
+Instance Binding
+Evidence
+```
+
+## Thread G：FastMatch 接入
+
+负责：
+
+```text
+Pose Seed
+Search Window
+Fallback
+TransformMatch
+FormFit
+```
+
+## Thread H：端到端验证
+
+负责：
+
+```text
+G1~G5
+Ablation
+Measurement Report
+```
+
+## Thread I：V2B 集成式等变网络
+
+只有 Thread H 通过后开启。
+
+## Thread J：CxGeoMetry 衔接
+
+只有 V2A/V2B 明确证明应用价值后开启。
+
+---
+
+# 24. 消融实验
+
+必须固定：
+
+| 版本 | 内容                                      |
+| -- | --------------------------------------- |
+| A0 | 当前 Mask `minAreaRect`                   |
+| A1 | 普通 CNN + 普通 Angle Regression            |
+| A2 | 旋转增强 + 普通 Angle Regression              |
+| A3 | C12 G-CNN + Harmonic Angle Decode       |
+| A4 | C24 G-CNN + Harmonic Angle Decode       |
+| A5 | A3/A4 + Pose-Mask Consistency           |
+| A6 | A5 + FastMatch                          |
+| A7 | 集成式 P3/P4/P5 Equivariant V2B            |
+| A8 | Python escnn / E(2) Reference Prototype |
+
+`escnn` 是当前较成熟的 PyTorch 等变网络研究库，也是 `e2cnn` 的后继者，但它是 Python/PyTorch 扩展，不应直接成为现有 C++ LibTorch Runtime 的生产依赖；更适合用于研究参考、数值对比和架构原型。
+
+---
+
+# 25. 性能与部署
+
+## 25.1 K 的成本
+
+如果 Base Channel 不变，Regular Representation 会增加 K 维计算和显存。
+
+第一版建议测试：
+
+```text
+C8
+C12
+C24
+```
+
+不要直接假设 C24 一定最优。
+
+通过减少 Base Channel 控制总容量：
+
+```text
+普通 128 channels
+
+可对应：
+C12 × 16 base channels
+或
+C24 × 8 base channels
+```
+
+实际比例通过参数量和延迟校准。
+
+## 25.2 性能统计
+
+必须分别记录：
+
+```text
+G-CNN Lift
+G-CNN Backbone
+Mask Pooling
+Angular Head
+YOLO Main Branch
+FastMatch Search
+FormFit
+Total
+```
+
+## 25.3 FP16 / INT8
+
+顺序仍保持：
+
+```text
+FP32 Correctness
+→ Model Resident
+→ Reduce D2H
+→ FP16
+→ Accuracy Gate
+→ Performance Gate
+→ 必要时 INT8
+```
+
+角度 Softmax、Harmonic Moment 和低概率分布建议第一版保留 FP32，避免半精度导致置信度和相位不稳定。
+
+---
+
+# 26. 风险控制
+
+## 风险 1：只替换几个 Conv，却错误宣称端到端等变
+
+控制：
+
+```text
+群特征从 Lift 到 Angular Head 全链保持 Group-aware
+```
+
+## 风险 2：对象对称性导致角度标签冲突
+
+控制：
+
+```text
+orientation_period
+harmonic_order
+angle_valid
+```
+
+必须进入 Target Contract。
+
+## 风险 3：15° Bin 被误认为必然达到 1°
+
+控制：
+
+```text
+Sub-bin 精度必须由受控数据实测
+不得由理论步长直接推断
+```
+
+## 风险 4：G-CNN 提升角度但拖慢总链
+
+控制：
+
+```text
+以 FastMatch 总收敛时间和失败率作为主要收益指标
+```
+
+## 风险 5：G-CNN 角度被直接当量测值
+
+控制：
+
+```text
+predictive_only = true
+Predictive Geometry Gate
+```
+
+## 风险 6：Circle 等无方向对象产生随机角度
+
+控制：
+
+```text
+angle_valid = false
+不计算 Angle Loss
+```
+
+## 风险 7：V2 破坏 V1 权重兼容
+
+控制：
+
+```text
+V1 冻结
+V2 独立 Architecture
+严格 Shared Key Transfer
+```
+
+## 风险 8：重复建设 CxGeoMetry
+
+控制：
+
+```text
+YOLO G-CNN 先做粗姿态验证
+CxGeoMetry 仍按显式模型图和 CPU 等价路线独立推进
+```
+
+---
+
+# 27. 开发约束基线
+
+1. **G-CNN 只负责粗姿态感知，不负责最终量测。**
+
+2. **“角度提取头”不得称为“角点提取头”。**
+
+3. **V1 YOLOv8-Seg 必须冻结，V2 单独建立。**
+
+4. **第一阶段优先实现离散 `C_N`，连续 E(2) 放到第二阶段。**
+
+5. **不得只替换孤立 Conv 后宣称整个网络旋转等变。**
+
+6. **群特征必须由 Group-aware 操作一直保持到 Angular Head。**
+
+7. **每个几何类别必须声明旋转周期。**
+
+8. **Circle 等方向未定义元素不计算角度损失。**
+
+9. **当前 TaskAligned Assignment、Mask BCE+Dice 必须复用，不得另写平行训练链。**
+
+10. **Geometry Target 必须按 Assigned GT Instance 对齐。**
+
+11. **Angular Head 输出必须包含完整分布、置信度和不确定度，不只输出单一角度。**
+
+12. **15°/30° Bin 的实际亚步长精度必须实测。**
+
+13. **Raw Pose、FastMatch Refined Pose、Final Measurement 必须分别保存。**
+
+14. **G-CNN 输出没有独立边缘证据时，只能是 PredictiveHypothesis。**
+
+15. **FastMatch、Normal Trace 和 FormFit 继续拥有最终几何收敛权。**
+
+16. **escnn/e2cnn 仅作为 Python 研究参考，不直接成为 C++ Runtime 生产依赖。**
+
+17. **V2A 未通过 G1~G5，不得启动 V2B。**
+
+18. **YOLO G-CNN 未证明 FastMatch 收敛收益，不得提前迁入 CxGeoMetry。**
+
+19. **CxGeoMetry 仍必须先完成 Legacy/CPU Tensor 等价，再进入 CUDA。**
+
+20. **没有消融证据的新等变模块不得进入默认模型。**
+
+---
+
+# 28. 最终推进顺序
+
+```text
+冻结 YOLOv8-Seg V1
+        ↓
+定义旋转对称和 Pose Target
+        ↓
+实现 C_N 基础算子
+        ↓
+算子等变性测试
+        ↓
+实现 V2A 等变姿态旁路
+        ↓
+Angular Extraction Head
+        ↓
+Synthetic Overfit
+        ↓
+全角度受控训练
+        ↓
+FormFit 精标训练
+        ↓
+Normal Trace 校准
+        ↓
+G1~G4 模型验证
+        ↓
+接入 FastMatch Seed
+        ↓
+G5 最终量测验证
+        ↓
+决定是否推进 V2B
+        ↓
+冻结 Coarse Pose Contract
+        ↓
+接入 CxGeoMetry 候选先验
+        ↓
+CxGeoMetry CPU Tensor 等价
+        ↓
+CxGeoMetry CUDA 批处理
+        ↓
+可选 CxGeoMetry Equivariant Descriptor
+```
+
+---
+
+# 29. 最终管理结论
+
+G-CNN 路线的价值不是替代 FastMatch，而是让：
+
+```text
+YOLOv8-Seg
+```
+
+从：
+
+```text
+能分割目标
+但姿态主要依靠普通卷积特征统计回归
+```
+
+升级为：
+
+```text
+能分割目标
+且群特征按明确旋转规律携带姿态信息
+```
+
+然后把：
+
+```text
+角度分布
+置信度
+不确定度
+```
+
+交给 FastMatch。
+
+最终系统分工保持不变：
+
+```text
+G-CNN：
+目标发现、实例分割、粗姿态、搜索先验
+
+FastMatch / Normal Trace：
+真实图像边缘、法线、对应关系、局部收敛
+
+FormFit：
+结构化几何拟合
+
+Calibration / Predictive Gate：
+正式量测裁决
+```
+
+所以最终链路不是：
+
+```text
+G-CNN
+→ 直接输出最终角度
+```
+
+而是：
+
+```text
+G-CNN 粗姿态分布
+→ 缩小 FastMatch 搜索空间
+→ Normal Trace 获取独立图像证据
+→ FormFit 几何闭合
+→ Predictive Gate 决定是否允许量测
+```
+
+完成这一验证后，G-CNN 的角度分布还可以进一步作为 CxGeoMetry 的 Transform Candidate Prior，用于显式 Route、Top-K 和 CUDA 批量候选搜索；但 CxGeoMetry 的模型化主体仍然是 FastMatch/CxTextInspect 自身的多尺度原型、明确 Route、候选路径和 Evidence，而不是把它们替换成另一个黑盒网络。
