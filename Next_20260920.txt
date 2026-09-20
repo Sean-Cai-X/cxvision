@@ -1,0 +1,2412 @@
+### 核心定位先对齐 
+ 
+这次对 FastMatch 的几何不变量扩充，本质是给它加一套**与姿态无关的“几何指纹”**，把原有“离散角度遍历匹配”的模式，升级为「不变量粗筛 → 姿态解析 → 精密拟合」三级匹配，从根上降低旋转搜索的计算量、提升旋转鲁棒性；同时完全保留 FormFit 的精度兜底能力，不突破五级边界链的分工。 
+ 
+它和模型侧 e3cnn 形成**双等变保险**：模型侧从图像特征层面做旋转等变，几何侧从轮廓形状层面做旋转不变，两边独立输出姿态初值、互相校验，再进入最终精密拟合，旋转场景的稳定性会再上一个台阶。 
+ 
+--- 
+ 
+## 一、功能边界与代码落点 
+ 
+### 1. 在 FastMatch 链路中的位置 
+ 
+插入在 **Normal Trace 边缘点云输出之后，Shape Model / FormFit 匹配之前**，属于「前置筛选与初值增强层」： 
+ 
+- 输入：Normal Trace 输出的有序轮廓点集、法线向量（来自 Runtime Observation Graph），以及参考模型的 PointsShape（来自 Immutable Model Graph） 
+- 输出：筛选后的候选列表、初始姿态估计、不变量相似度评分 
+- 严格边界：**只做粗匹配、初值、筛选，不替代最终精密拟合**；最终几何精度、残差、计量结论仍然由 FormFit + Normal Trace 负责，证据链完整可追溯。 
+ 
+### 2. 对应现有代码结构 
+ 
+- 新增模块落点：`cxgeom/FastMatch/` 下新增 `CxGeoHarmonic` 子模块，独立实现球谐展开、CG 系数、不变量计算、姿态反演，不侵入核心拟合逻辑。 
+- 模型资产扩展：Immutable Model Graph 的每层 PointsShape 新增预计算的球谐系数与不变量特征，纳入模型包 Schema 管理。 
+- 运行时数据扩展：Runtime Observation Graph 新增观测侧球谐系数字段，Runtime Result Graph 新增不变量相似度、姿态来源标记。 
+ 
+--- 
+ 
+## 二、三大核心功能模块（详细实现） 
+ 
+### 模块 1：轮廓极坐标化与球谐展开模块 
+ 
+把笛卡尔坐标下的离散轮廓点集，转换成球谐分析的标准输入，是整个不变量体系的基础。 
+ 
+#### 输入输出 
+ 
+- 输入：有序轮廓点集 `std::vector<Point2f>`、质心坐标、法线向量（Normal Trace 输出） 
+- 输出：各阶球谐系数向量 `f_{l,m}`、展开阶数 L_max、多尺度展开结果 
+ 
+#### 实现步骤 
+ 
+1. **轮廓中心化与归一化** 
+   - 计算轮廓质心，转换到质心极坐标系，消除平移影响； 
+   - 按轮廓大小做归一化，消除尺度影响（可选，根据匹配场景决定是否保留尺度不变性）。 
+2. **极坐标均匀采样** 
+   - 对平面内旋转（SO(2)场景）：按角度 θ∈[0,2π) 均匀采样，生成径向距离函数 r(θ)、法线角度函数 n(θ)； 
+   - 对三维离面旋转（SO(3)场景）：将轮廓投影到单位球面，生成球面轮廓函数 f(θ,φ)。 
+3. **多尺度球谐展开** 
+   - 对应 FastMatch 现有 L3/L6/L12/L36/L72 五级尺度，每层轮廓分别做球谐展开； 
+   - 平面场景用傅里叶级数（二维球谐简化），三维场景用完整球谐函数； 
+   - 阶数选择：低阶（l≤4）捕捉整体形状，高阶（l≤12）捕捉倒角、缺口、孔洞等细节，工业零件场景 l_max=8~12 足够。 
+4. **资产预计算** 
+   - 参考模型的球谐系数提前预计算，存入 Immutable Model Graph，运行时直接加载，不用每次计算。 
+ 
+--- 
+ 
+### 模块 2：几何旋转不变量计算模块 
+ 
+基于 Clebsch-Gordan 系数耦合构造多阶不变量，对应不同的匹配粒度，从粗到细分层使用。 
+ 
+#### 1. 二阶不变量：功率谱（全局形状指纹） 
+ 
+- **原理**：同阶球谐系数的模平方和，是最基础的旋转不变量，对应 l 阶形状的总能量，与姿态完全无关。 
+$$P_l = \sum_{m=-l}^l |f_{l,m}|^2$$ 
+- **用途**：快速全局粗筛，判断两个轮廓是不是同一类形状，过滤掉明显不匹配的候选。 
+- **工程实现**：预计算参考模型各阶功率谱，运行时计算观测侧功率谱，用欧氏距离/余弦相似度计算匹配得分。 
+ 
+#### 2. 高阶耦合不变量：细节形状指纹 
+ 
+- **原理**：通过 CG 系数将多阶球谐系数耦合到总角动量 L=0，构造三阶、四阶标量不变量，对局部细节（倒角半径、缺口形状、孔洞位置）更敏感。 
+以三阶为例： 
+$$I = \sum_{\substack{m_1,m_2,m_3 \ M_{12}}} C(l_1 l_2 L_{12}; m_1 m_2 M_{12}) \cdot C(L_{12} l_3 0; M_{12} m_3 0) \cdot f_{l_1,m_1} f_{l_2,m_2} f_{l_3,m_3}$$ 
+- **用途**：区分相似形状的不同零件，做细分类和精准匹配，避免“形状差不多就误匹配”。 
+- **工程实现**：预计算常用阶数组合的 CG 系数表，运行时查表+缩并求和，避免重复计算。 
+ 
+#### 3. 姿态反演：从球谐系数解析初始角度 
+ 
+- **平面 SO(2) 场景**：从 l=1 阶的相位、或各阶 m 分量的相位差，直接计算连续旋转角 θ，无分箱误差； 
+- **三维 SO(3) 场景**：通过 Wigner D 矩阵匹配，反演欧拉角 (α,β,γ)； 
+- **用途**：输出连续姿态初值，注入后续 RotateMatchAB / TransformMatch，缩小搜索范围，减少迭代次数。 
+ 
+#### 输出 
+ 
+不变量特征向量、姿态初值、相似度评分、置信度。 
+ 
+--- 
+ 
+### 模块 3：基于不变量的匹配与筛选模块 
+ 
+和 FastMatch 现有匹配、路由、去重链路完全对接，不改变原有逻辑，只做增强。 
+ 
+#### 1. 多尺度不变量预筛选 
+ 
+- 对应现有跨层 Route 机制，从粗到细逐层筛选： 
+  1. L3 层用低阶功率谱做全局粗筛，过滤掉 70%~80% 的不相关候选； 
+  2. L6/L12 层用高阶耦合不变量做细筛，保留 Top-K 候选进入下一层； 
+  3. L36/L72 层再进入原有模板匹配和 FormFit 精密拟合。 
+- 收益：高层精密匹配的候选数大幅减少，整体匹配速度提升 30% 以上。 
+ 
+#### 2. 初始姿态注入 
+ 
+- 把不变量解析出的连续姿态初值，直接注入 RotateMatchAB 和 TransformMatch 的初始搜索位置； 
+- 替代原有离散角度遍历的起点，把“从 0° 开始搜”变成“从最优估计值附近搜”，搜索范围从 ±180° 缩小到 ±15° 以内，迭代次数减少 60% 以上。 
+ 
+#### 3. 几何重复抑制升级 
+ 
+- 原有重复抑制基于位置 IOU 判断，旋转后的同一目标容易误判为两个； 
+- 新增不变量特征距离判断：两个候选的不变量特征距离小于阈值，就判定为同一目标的重复命中； 
+- 对应现有 `m_duplicates_list`，新增不变量距离维度，旋转场景下的重复识别准确率提升到 99% 以上。 
+ 
+--- 
+ 
+## 三、分阶段落地流程（详细步骤与验收） 
+ 
+完全贴合项目现有 P0-P3 工程节奏，逐级推进，风险可控。 
+ 
+### 阶段 0：原理验证与原型开发（P0 级 ） 
+ 
+**目标**：验证工业零件场景下不变量的有效性，不侵入主代码，风险最低。 
+ 
+#### 详细步骤 
+ 
+1. **数据集准备** 
+   - 从现有 FastMatch 测试集中抽取典型零件样本，覆盖 0°~360° 全角度旋转、不同尺度、局部遮挡、低对比度场景； 
+   - 标注真值：旋转角度、匹配结果、几何参数。 
+2. **Python 原型实现** 
+   - 基于 scipy.special 实现球谐展开、CG 系数计算、功率谱/高阶不变量计算、姿态反演全流程； 
+   - 实现多尺度不变量匹配的完整原型。 
+3. **指标验证** 
+   - 不变量稳定性：同一零件不同旋转角度下，功率谱相对误差 < 1%； 
+   - 姿态估计精度：平面内旋转角度 MAE < 0.5°； 
+   - 筛选效率：候选数减少 70% 以上，最终匹配准确率不下降； 
+   - 鲁棒性：遮挡、低对比度场景下，不变量匹配的抗干扰能力优于原有模板匹配。 
+4. **边界**：独立原型验证，不修改 C++ 代码，不影响现有链路。 
+ 
+#### 验收标准 
+ 
+不变量鲁棒性、姿态精度、筛选效率达到预期，确认工程化价值。 
+ 
+--- 
+ 
+### 阶段 1：C++ 模块集成与模型资产化（P1 级） 
+ 
+**目标**：把不变量模块集成进 FastMatch C++ 工程，完成模型资产扩展，结果与原型等价。 
+ 
+#### 详细步骤 
+ 
+1. **C++ 模块开发** 
+   - 在 `cxgeom/FastMatch/` 下新增 `CxGeoHarmonic` 模块； 
+   - 核心实现：极坐标采样、球谐函数递推、CG 系数递推表、不变量缩并计算、姿态反演； 
+   - 复用现有 Eigen 库做矩阵运算，不引入重型第三方依赖。 
+2. **模型资产扩展** 
+   - 扩展 `CxGeoMetryLevelModel` 结构体，新增 `harmonic_coeffs`、`invariant_features` 字段； 
+   - 参考模型导出时自动预计算各尺度球谐系数与不变量，存入模型包； 
+   - 更新模型包 Schema，新增 harmonic 分支，支持版本、哈希校验。 
+3. **接口对接** 
+   - 输入对接 `NormalTraceEvidence` 的边缘点集与法线数据； 
+   - 输出对接 `ShapeModel` 匹配接口，新增不变量相似度分支。 
+4. **等价性验证** 
+   - C++ 实现与 Python 原型逐项对比，数值误差在允许范围内； 
+   - 原有匹配结果完全一致：不变量只做前置筛选，不改变最终 FormFit 拟合逻辑。 
+ 
+#### 验收标准 
+ 
+模块集成完成，结果等价，模型资产可导出、可导入、可版本管理。 
+ 
+--- 
+ 
+### 阶段 2：全链路打通与性能优化（P2 级，3 周） 
+ 
+**目标**：和 FastMatch 现有匹配、路由、去重全链路打通，验证性能与精度收益。 
+ 
+#### 详细步骤 
+ 
+1. **多尺度路由对接** 
+   - 把不变量相似度接入跨层 Route 机制，替代固定权重，实现自适应路由； 
+   - L3 层粗筛 → L6/L12 层细筛 → L36/L72 层精密匹配，逐层收敛。 
+2. **姿态初值注入** 
+   - 不变量解析的姿态接入 RotateMatchAB / TransformMatch 的初始变换； 
+   - 对比原有离散搜索：收敛迭代次数、匹配失败率、单帧耗时。 
+3. **重复抑制升级** 
+   - 新增不变量距离的重复判断逻辑，与原有位置 IOU 判断结合； 
+   - 验证旋转、重叠场景下的重复识别准确率。 
+4. **性能优化** 
+   - 参考模型全预计算，运行时仅计算观测侧； 
+   - 阶数自适应：简单形状自动用低阶，复杂形状自动升高阶，控制计算量； 
+   - 定点化优化：关键计算用 SIMD 指令加速。 
+ 
+#### 验收标准 
+ 
+- 匹配速度提升 30% 以上，复杂旋转场景失败率下降 40% 以上； 
+- 最终几何精度、拟合残差与原有方案持平，不降低精度底线； 
+- 证据链完整，不变量来源、姿态来源可追溯。 
+ 
+--- 
+ 
+### 阶段 3：生产级固化与双链路协同（P3 级，持续迭代） 
+ 
+**目标**：和模型侧 e3cnn 协同，纳入生产双轨体系，形成双保险。 
+ 
+#### 详细步骤 
+ 
+1. **双初值校验机制** 
+   - e3cnn 输出的模型粗姿态 + FastMatch 不变量解析的几何姿态，双路独立计算； 
+   - 偏差小于阈值则直接进入精密拟合，偏差过大则触发全角度重搜，避免单路失效。 
+2. **生产模型库固化** 
+   - 所有正式生产模型预计算不变量特征，纳入模型版本管理； 
+   - 新增不变量相关的测试用例，加入回归测试集。 
+3. **异常降级机制** 
+   - 不变量匹配置信度低于阈值时，自动回退到原有全搜索模式； 
+   - 降级原因全程记录，不静默失效。 
+4. **双轨通道适配** 
+   - 开发通道默认开启不变量加速，快速迭代验证； 
+   - 生产通道作为可选增强，走完整准入流程后启用。 
+ 
+#### 验收标准 
+ 
+- 全链路稳定，旋转场景生产通过率显著提升； 
+- 所有结果可解释、可追溯、可复现。 
+ 
+--- 
+ 
+## 四、关键工程权衡与边界控制 
+ 
+1. **阶数选择：够用就好，不追求高阶** 
+   - 平面内旋转：l_max=8~12 足够覆盖工业零件细节，l=6 即可完成大部分粗筛； 
+   - 三维离面旋转：l_max=16 足够，避免阶数过高导致计算量爆炸。 
+2. **计算量：预计算+逐层筛选，整体不增反降** 
+   - 参考模型预计算，一次生成终身使用，运行时只算观测侧； 
+   - 粗层过滤掉绝大多数候选，高层只算少量候选，整体耗时比原有全角度遍历更短。 
+3. **边界守住：永远不替代最终拟合** 
+   - 不变量只做前置筛选和初值，最终精度、残差、计量结论永远由 FormFit + Normal Trace 负责； 
+   - 不破坏证据链，不变量计算过程、相似度、姿态来源全部记入 Evidence。 
+4. **分工明确：和 e3cnn 不重复、互补** 
+   - e3cnn：模型侧，从图像特征中学习旋转等变，抗干扰强； 
+   - FastMatch 不变量：几何侧，从轮廓点云中计算旋转不变，确定性高； 
+   - 两者独立输出、互相校验，形成“感知+几何”双保险。 
+ 
+--- 
+ 
+## 最终总结 
+ 
+这次扩充不是改造 FastMatch 的核心拟合逻辑，而是给它加了一层**旋转免疫的前置雷达**——原来的“搜索→拟合”两步走，变成“筛选→初值→拟合”三步走，旋转场景下又快又稳，同时完全守住几何精度的底线。 
+ 
+结合模型侧的 e3cnn，最终会形成一套**特征等变 + 几何不变**的双体系：从图像输入到轮廓提取，从姿态估计到精密拟合，全链路都有旋转鲁棒性保障.                              这里要根据当前代码梳理FastMatch侧代码推进细节流程
+
+
+# 结论先行
+
+你的总体定位是成立的：
+
+```text
+原有 FastMatch：
+离散角度 / 尺度 / 位置搜索
+→ 候选评分
+→ FormFit
+
+升级后：
+几何不变量粗筛
+→ 连续姿态初值
+→ TransformMatch / RotateMatchAB 局部搜索
+→ Shape Model FormFit
+→ Normal Trace / 量测 Gate
+```
+
+这确实可以把 FastMatch 从“较大范围枚举搜索”推进为：
+
+> **几何指纹筛选 + 姿态假设 + 确定性精配准。**
+
+并且与模型侧旋转等变网络形成两条独立证据：
+
+```text
+模型侧 C_N / E(2) G-CNN
+→ 从图像特征输出粗姿态分布
+
+FastMatch 几何不变量
+→ 从轮廓形状输出候选身份和姿态假设
+
+二者一致
+→ 缩小 TransformMatch 搜索范围
+
+二者冲突
+→ 扩大搜索、回退 RotateMatchAB 或进入人工审核
+
+最终
+→ Normal Trace + FormFit + Calibration 决定量测结果
+```
+
+但根据当前 FastMatch 代码，方案必须先做四项关键修正：
+
+1. **当前处理的是二维平面轮廓，P0/P1 应采用 SO(2) Fourier / Elliptic Fourier，不应直接上 SO(3) 球谐、Wigner D 和 Clebsch–Gordan。**
+2. **旋转不变量只能用于识别和筛选；纯功率谱丢失相位，不能单独反演姿态。姿态估计必须保留等变 Fourier 系数或做循环相关。**
+3. **当前运行时 Shape Model 的观察轮廓是在已有 Seed 后才生成，不能拿它反过来给 FormFit 提供初始 Seed，否则会形成循环依赖。**
+4. **当前 `L72/L36/L12/L6/L3`、Route、Duplicate 和 `m_imagefastmatchlist` 的真实语义，与前述概念化描述存在差异，必须先按代码完成语义审计。**
+
+上传材料把 FastMatch 的 `m_models_l*`、`m_imagefastmodels_l*`、Route 和重复候选机制理解为显式多尺度网络雏形，这个总体框架是有价值的。 但在真正落代码前，需要以当前实现的实际 Key/Value、数据方向和生命周期为准。
+
+---
+
+# 一、首先修正数学路线：当前应是 SO(2)，不是 SO(3)
+
+## 1. 当前 FastMatch 数据是二维轮廓
+
+当前核心数据均为：
+
+```text
+cv::Point2d / CxShapePoint
+x, y
+tangent_x, tangent_y
+normal_x, normal_y
+2D affine / projective transform
+```
+
+`FastMatchTransform` 处理的是二维中心、角度、X/Y 缩放、Shear 和二维投影项，并不是三维刚体旋转。
+
+因此 P0/P1 最合理的是：
+
+```text
+二维闭合轮廓
+→ SO(2) Fourier / Elliptic Fourier Descriptor
+→ 旋转不变量
+→ 平面旋转姿态估计
+```
+
+而不是：
+
+```text
+二维轮廓
+→ 投影到球面
+→ SO(3) 球谐
+→ Wigner D
+→ 欧拉角
+```
+
+完整球谐、Wigner D 和 Clebsch–Gordan 更适合：
+
+```text
+真实 3D 点云
+3D 表面
+球面信号
+高度场形成的三维对象
+```
+
+后续可单独规划：
+
+```text
+CxGeoSO3Harmonic
+```
+
+但不应进入当前二维 FastMatch 主线。
+
+---
+
+## 2. 建议正式命名
+
+不要第一阶段使用过宽的：
+
+```text
+CxGeoHarmonic
+```
+
+建议明确为：
+
+```text
+CxGeoSO2Harmonic
+```
+
+未来如果确实有三维数据，再单独新增：
+
+```text
+CxGeoSO3Harmonic
+```
+
+二者不得共用模糊的数据 Schema。
+
+---
+
+## 3. 当前二维闭合轮廓优先采用什么
+
+建议 P0 同时验证两种二维表达，但生产首选其中一种：
+
+### 方案 A：复数轮廓 Fourier Descriptor
+
+将弧长均匀重采样的轮廓表示为：
+
+```text
+z(s) = x(s) + i y(s)
+```
+
+做 DFT：
+
+```text
+z(s)
+→ c₀, c₁, c₂, ...
+```
+
+其中：
+
+* `c₀` 对应平移；
+* 系数总体尺度可用于估计尺寸；
+* 系数相位携带旋转和轮廓起点信息；
+* 系数模长可形成旋转/起点不变量。
+
+### 方案 B：Elliptic Fourier Descriptor
+
+EFD 本身就是针对二维闭合轮廓建立的经典 Fourier 表达，更适合有序闭合边界，不要求先把轮廓写成单值的 `r(θ)` 函数。([Semantic Scholar][1])
+
+我更建议：
+
+```text
+P0 Python：
+复数轮廓 Fourier + EFD 都测试
+
+P1 C++：
+选择更适合当前轮廓和 Pose 恢复的一种
+```
+
+---
+
+# 二、不要直接使用 `r(θ)` 作为唯一轮廓表示
+
+你提出：
+
+```text
+质心极坐标
+→ r(θ)
+```
+
+对于以下图形有效：
+
+```text
+凸形
+星形轮廓
+从质心向任意角度只有一个交点的形状
+```
+
+但当前工业零件可能包含：
+
+```text
+凹槽
+缺口
+内凹边界
+孔洞
+多个连通分量
+开放曲线
+部分遮挡
+```
+
+这时同一个 `θ` 可能对应多个半径，`r(θ)` 不再是单值函数。
+
+因此建议：
+
+## 闭合单轮廓
+
+使用：
+
+```text
+弧长参数化 contour(s)
+→ Fourier / EFD
+```
+
+## 带孔轮廓
+
+分别计算：
+
+```text
+outer descriptor
+hole descriptors[]
+hole area ratio
+hole centroid offset
+topology metadata
+```
+
+## 多连通区域
+
+分别计算每个 Component，并保留：
+
+```text
+component_count
+area ratio
+relative centroid
+parent/child topology
+```
+
+## 开放曲线、直线、圆弧
+
+第一阶段不进入闭合轮廓不变量主线，使用：
+
+```text
+endpoint-normalized tangent/curvature descriptor
+```
+
+或直接回退现有：
+
+```text
+RotateMatchAB / TransformMatch / FormFit
+```
+
+不要为了统一接口把开放曲线强行闭合。
+
+---
+
+# 三、必须区分“不变量”和“姿态可恢复量”
+
+这是当前方案中最关键的数学边界。
+
+## 1. 功率谱可以筛选，但不能独立恢复角度
+
+如果只保存：
+
+$$
+P_k = |c_k|^2
+$$
+
+那么旋转造成的相位已经被消除。
+
+它适合回答：
+
+```text
+两个轮廓形状是否相似？
+```
+
+但不能回答：
+
+```text
+观测轮廓相对参考轮廓旋转了多少度？
+```
+
+所以模型资产必须同时保存两类信息：
+
+```text
+Invariant Descriptor
+→ 用于候选粗筛和分类
+
+Equivariant Coefficients
+→ 用于姿态估计和角度假设
+```
+
+---
+
+## 2. 姿态估计建议采用相位/循环相关
+
+参考与观测分别保存：
+
+```text
+c_ref[k]
+c_obs[k]
+```
+
+通过：
+
+```text
+cross-phase
+cyclic correlation
+weighted harmonic alignment
+```
+
+求多个姿态假设：
+
+```text
+θ₀, score₀
+θ₁, score₁
+θ₂, score₂
+```
+
+而不是只输出一个角度。
+
+对于对称零件必须输出多峰：
+
+```text
+矩形：
+θ 与 θ+180° 等价
+
+正方形：
+θ、θ+90°、θ+180°、θ+270° 等价
+
+圆：
+无有效角度
+```
+
+建议结果合同包含：
+
+```text
+orientation_period_deg
+symmetry_order
+angle_hypotheses[]
+angle_confidence
+angle_ambiguity
+```
+
+---
+
+## 3. 高阶 Bispectrum 放到 P2，而不是 P0
+
+高阶耦合不变量可以保留更多相位关系，Bispectrum 确实可作为群上的相位敏感不变量来源。([arXiv][2])
+
+但当前 P0 不建议直接实现：
+
+```text
+完整 CG 表
+三阶、四阶 SO(3) 缩并
+```
+
+先验证：
+
+```text
+Fourier magnitude / EFD invariant
++
+phase correlation pose
+```
+
+是否已经能显著减少候选。
+
+只有出现：
+
+```text
+不同局部缺口零件功率谱太相近
+粗筛区分能力不足
+```
+
+时，再增加：
+
+```text
+SO(2) bispectrum
+```
+
+而不是直接引入完整 SO(3) Clebsch–Gordan 体系。
+
+---
+
+# 四、当前代码语义必须先纠正
+
+## 1. `L72/L36/L12/L6/L3` 当前确实是网格尺寸
+
+当前 `levelmodels_l72tol36()` 明确执行：
+
+```cpp
+SetModelWH(72, 72);
+GridZoom(36, 36);
+```
+
+后续又依次：
+
+```text
+36 → 12
+12 → 6
+6 → 3
+```
+
+所以当前代码已经确认：
+
+```text
+L72/L36/L12/L6/L3
+主要对应 Grid 模型尺寸
+```
+
+而不是 Fourier 阶数或球谐阶数。
+
+因此：
+
+> **禁止把 L72 直接对应为高阶 Harmonic、L3 直接对应为低阶 Harmonic。**
+
+需要独立定义 Harmonic Band：
+
+```text
+H-low   k=1~3
+H-mid   k=4~6
+H-high  k=7~12
+```
+
+后续可以制定策略：
+
+```text
+L3/L6 候选
+→ 使用 H-low
+
+L12
+→ 使用 H-low + H-mid
+
+L36/L72
+→ 使用全部 Band
+```
+
+但这只是后续 Policy，不是当前代码事实。
+
+---
+
+## 2. 当前 Route Map 的方向与名字容易误导
+
+以：
+
+```cpp
+m_mapl36_l72
+```
+
+为例，`levelmodels_l72tol36()` 中实际写入：
+
+```cpp
+m_mapl36_l72[l72_index] = l36_index;
+```
+
+也就是：
+
+```text
+Key   = L72 节点
+Value = L36 节点
+```
+
+同样：
+
+```cpp
+m_mapl3_l6[l6_index] = l3_index;
+```
+
+当前构建方向实际上是：
+
+```text
+Fine → Coarse
+```
+
+而不是材料中直观写出的：
+
+```text
+L3 → L6 → L12 → L36 → L72
+```
+
+。
+
+所以在不变量接入 Route 前，必须先建立统一 Route Edge：
+
+```cpp
+struct CxGeoMetryRouteEdge
+{
+    int fine_level;
+    int fine_model_id;
+
+    int coarse_level;
+    int coarse_model_id;
+};
+```
+
+然后根据需要派生：
+
+```text
+fine_to_coarse adjacency
+coarse_to_fine reverse adjacency
+```
+
+不要直接按变量名猜方向。
+
+---
+
+## 3. `m_imagefastmatchlist` 当前不是 Top-K 队列
+
+当前代码中：
+
+```cpp
+m_imagefastmatchlist = m_pgrid->getfastmodel();
+```
+
+随后逐元素与：
+
+```cpp
+m_imagefastmodel
+```
+
+比较，计算 `OK/NG`。它更接近：
+
+```text
+当前观测图像的 Grid Fast Feature Vector
+```
+
+而不是：
+
+```text
+最终 Top-K Candidate Queue
+```
+
+。
+
+因此后续真正的 Harmonic Top-K 应单独建立：
+
+```text
+CxFastMatchHarmonicCandidate[]
+```
+
+禁止复用 `m_imagefastmatchlist` 名称。
+
+---
+
+## 4. 当前 `m_duplicates_list_*` 不是位置 IoU 去重
+
+当前 `list_duplicatesmodel_l72()` 会调用：
+
+```cpp
+modelcompare(
+    m_imagefastmodels_l72[i],
+    m_imagefastmodels_l72[j])
+```
+
+对完全相同的编码模型进行分组。
+
+所以它当前是：
+
+```text
+离线模型原型重复组
+```
+
+而不是：
+
+```text
+运行时候选位置 IoU NMS
+```
+
+后续应分成两种机制：
+
+### 模型资产重复
+
+```text
+现有 exact IMAGEFASTMODEL equality
++
+Harmonic descriptor distance
+```
+
+### 运行时候选重复
+
+```text
+位置 / overlap
++
+姿态接近
++
+descriptor 相似
++
+instance identity
+```
+
+不能仅凭不变量相似度合并候选，否则图中两个相同零件会被错误合并。
+
+---
+
+# 五、当前代码中正确的插入位置
+
+## 1. Learn / Reference Model 流程
+
+当前学习路径中：
+
+```text
+Normal Trace
+→ normal_pair_source_points
+→ derived_trace_points
+→ buildReferenceFormFitModel()
+→ BuildFastMatchReferenceShapeModel()
+→ self-observation FormFit
+```
+
+`buildReferenceFormFitModel()` 当前将：
+
+* `normal_pair_source_points` 转为真实 Sparse Source；
+* `derived_trace_points` 转为闭合连续 Trace；
+* `derived_junction_points` 转为结构连接；
+* 然后构建 `m_reference_shape_model`。
+
+因此 Harmonic Descriptor 的最佳插入位置不是在 Normal Trace 原始数组上直接计算，而是：
+
+```text
+BuildFastMatchReferenceShapeModel()
+        ↓
+确认 available / closed
+        ↓
+从 reference_shape_model.dense_points
+构建标准化闭合轮廓
+        ↓
+计算 SO(2) Descriptor
+        ↓
+保存 Reference Harmonic Asset
+        ↓
+继续 self-observation FormFit
+```
+
+具体位置：
+
+```cpp
+m_reference_shape_model =
+    BuildFastMatchReferenceShapeModel(...);
+
+// 新增：
+buildReferenceHarmonicDescriptor();
+
+if (!m_reference_shape_model.available) ...
+```
+
+---
+
+## 2. 为什么应使用 Shape Model 后的标准轮廓
+
+当前 Reference Shape Model 同时包含：
+
+```text
+sparse_points
+→ 来自真实 FindLine / Normal Trace 来源点
+
+dense_points
+→ 来自 derived closed trace，经重采样和法线方向图像修正
+
+anchors
+→ Junction / Curvature / Symmetry 等结构锚点
+```
+
+。
+
+建议：
+
+```text
+Harmonic Descriptor
+→ 使用 dense closed contour
+→ 仅作为筛选和姿态先验
+
+最终量测 Evidence
+→ 仍使用 sparse source points / observed refined points
+```
+
+当前代码已经明确规定 `derived_trace_points` 是插值产生的模型/显示轮廓，不允许成为新的量测证据。
+
+所以 Harmonic Descriptor 必须标记：
+
+```text
+descriptor_role = model_screening
+measurement_evidence = false
+```
+
+---
+
+# 六、运行时插入点存在一个关键循环依赖
+
+用户原方案写的是：
+
+```text
+运行时 Normal Trace
+→ Harmonic
+→ FormFit
+```
+
+但当前代码实际是：
+
+```text
+已有 Seed Transform
+→ BuildFastMatchObservedShapeModel
+→ 将 Reference Shape 投影到图像
+→ 沿法线找真实边缘
+→ Observed Shape
+→ FormFit
+```
+
+`runFormFitOnImage()` 会先根据 Seed 创建 Observed Shape，再做双向 FormFit。
+
+因此当前：
+
+```text
+Observed Shape
+```
+
+本身已经依赖：
+
+```text
+初始 Seed
+```
+
+如果再用它计算 Harmonic Pose 来生成同一个 Seed，就形成循环：
+
+```text
+需要 Seed 才能得到 Observed Shape
+需要 Observed Shape 才能得到 Harmonic Seed
+```
+
+---
+
+# 七、运行时观测轮廓的正确来源
+
+Harmonic 前置筛选必须使用一个**独立于 FormFit Seed** 的观察轮廓。
+
+建议来源优先级：
+
+## 来源 1：FindSegmentation Instance Contour
+
+```text
+YOLOv8-Seg / DeepLab / EdgeSAM
+→ FindSegmentationRegion
+→ instance contour
+→ Harmonic Observation
+```
+
+这是第一阶段最容易接入的来源。
+
+## 来源 2：FindObject 外轮廓
+
+当前 FastMatch 已有 Template Geometry 和 Pose Candidate 的 FindObject 对接，可复用其 `outer_boundary` 或规范化边界。
+
+## 来源 3：独立 Runtime Normal Trace
+
+新增一个：
+
+```text
+runtime_observation_trace
+```
+
+它不能依赖已经变换的 Reference Model，而应从：
+
+```text
+粗 ROI
+传统 Edge
+模型 Mask band
+```
+
+独立获得。
+
+## 来源 4：RotateMatchAB 粗候选边界
+
+先用 RotateMatchAB 得到粗姿态，再将参考轮廓投影到候选位置，局部提取 Observation；此时 Harmonic 的主要作用是候选验证，而不是全局发现。
+
+---
+
+# 八、运行时完整主线
+
+建议最终形成三级模式：
+
+## Mode 0：Audit
+
+```text
+观测轮廓
+→ Harmonic 计算
+→ 记录候选和 Pose
+→ 不改变现有 FastMatch 结果
+```
+
+用于验证。
+
+## Mode 1：Prefilter
+
+```text
+当前 Legacy Candidate Set
+→ Harmonic Invariant Distance
+→ Top-K 保留
+→ 原有 RotateMatchAB / TransformMatch / FormFit
+```
+
+只减少候选，不修改姿态搜索逻辑。
+
+## Mode 2：Pose Seed
+
+```text
+观测轮廓
+→ Invariant Top-K
+→ Pose Hypotheses
+→ FastMatchTransform Seed
+→ TransformMatch
+→ FormFit
+```
+
+## Mode 3：Fallback
+
+```text
+Harmonic 低置信度
+轮廓开放
+遮挡过重
+候选多峰
+描述子失效
+        ↓
+Narrow / Full RotateMatchAB
+        ↓
+TransformMatch
+        ↓
+FormFit
+```
+
+禁止静默失败。
+
+---
+
+# 九、与当前 RotateMatchAB 和 TransformMatch 的具体关系
+
+## 1. 高置信度 Pose
+
+直接构建：
+
+```cpp
+FastMatchTransform seed;
+seed.cx = observation_centroid.x;
+seed.cy = observation_centroid.y;
+seed.angle_deg = harmonic_angle;
+seed.scale_x = estimated_scale;
+seed.scale_y = estimated_scale;
+```
+
+写入：
+
+```text
+m_transform_search_initial
+m_transform_seed_evidence
+```
+
+然后直接：
+
+```cpp
+transformmatch(image);
+```
+
+当前 `transformmatch()` 在搜索收敛后会自动调用 `runFormFitOnImage()`。
+
+这是最自然的接入点。
+
+---
+
+## 2. 中等置信度 Pose
+
+设置：
+
+```text
+angle center = harmonic angle
+angle range  = confidence-derived range
+```
+
+然后缩小 RotateMatchAB 的：
+
+```text
+m_dangle_mud
+m_dangle_add
+```
+
+或通过现有：
+
+```cpp
+setrotateanglescale(...)
+```
+
+缩窄角度范围。
+
+RotateMatchAB 当前会显式遍历配置角度区间并扫描位置，所以 Harmonic 的实际收益是减少要枚举的角度，而不是完全替代它。
+
+---
+
+## 3. 低置信度
+
+保持原有：
+
+```text
+Full RotateMatchAB
+```
+
+或使用：
+
+```text
+FindSegmentation OBB
+Torch OBB
+Search ROI Center
+```
+
+作为 Seed。
+
+当前 FastMatch 已经支持从 FindSegmentation 和 Torch 结果构造 `FastMatchTransform`。
+
+---
+
+# 十、建议的文件落点
+
+用户提出：
+
+```text
+cxgeom/FastMatch/CxGeoHarmonic
+```
+
+但当前仓库的实际结构是：
+
+```text
+cxgeom/include/
+cxgeom/src/
+
+cximage/FastMatch.cpp
+cximage/CxFastMatchShapeModel.cpp
+```
+
+根 CMake 也将 FastMatch 作为 `cximage` 源，而 `cxgeom` 目前只放纯几何构建和数据结构。
+
+因此建议：
+
+## 纯数学模块
+
+```text
+cxgeom/include/CxGeoSO2Harmonic.h
+cxgeom/src/CxGeoSO2Harmonic.cpp
+```
+
+职责：
+
+```text
+轮廓规范化
+弧长重采样
+Fourier / EFD
+不变量
+姿态候选
+距离
+```
+
+不得依赖：
+
+```text
+FastMatch
+Image
+CxScript
+UI
+Evidence
+```
+
+## FastMatch 适配层
+
+```text
+cximage/CxFastMatchHarmonicAdapter.h
+cximage/CxFastMatchHarmonicAdapter.cpp
+```
+
+职责：
+
+```text
+从 FastMatch Shape Model 提取轮廓
+从 FindSegmentation / FindObject 获得观测轮廓
+调用 CxGeoSO2Harmonic
+构建 FastMatchTransform
+写入 Evidence
+控制 Fallback
+```
+
+## FastMatch 状态
+
+在 `FastMatch.h` 增加：
+
+```text
+CxFastMatchHarmonicConfig
+CxFastMatchHarmonicEvidence
+reference_descriptor
+last_match_result
+```
+
+但不把 Fourier 数学实现塞回 `FastMatch.cpp`。
+
+---
+
+# 十一、建议的数据合同
+
+## 1. 配置
+
+```cpp
+struct CxGeoSO2HarmonicConfig
+{
+    int sample_count = 256;
+    int max_order = 12;
+
+    bool normalize_translation = true;
+    bool normalize_scale = true;
+    bool preserve_scale_estimate = true;
+
+    bool use_contour_signal = true;
+    bool use_normal_signal = true;
+
+    bool allow_reflection = false;
+    bool require_closed_contour = true;
+
+    double minimum_perimeter_px = 20.0;
+    int minimum_source_points = 16;
+};
+```
+
+---
+
+## 2. Descriptor
+
+```cpp
+struct CxGeoSO2Descriptor
+{
+    std::string schema =
+        "cxgeometry.so2_fourier.v1";
+
+    bool valid = false;
+    bool closed = false;
+
+    int sample_count = 0;
+    int max_order = 0;
+
+    cv::Point2d centroid;
+    double scale = 1.0;
+    double perimeter = 0.0;
+    double signed_area = 0.0;
+
+    int winding = 0;
+    int symmetry_order = 1;
+
+    std::vector<double> coefficient_real;
+    std::vector<double> coefficient_imag;
+
+    std::vector<double> invariant_magnitude;
+    std::vector<double> normal_invariant;
+
+    std::string source_ref;
+    std::string descriptor_hash;
+    std::string failure_reason;
+};
+```
+
+---
+
+## 3. Pose Hypothesis
+
+```cpp
+struct CxGeoSO2PoseHypothesis
+{
+    double angle_deg = 0.0;
+    double scale = 1.0;
+
+    double correlation = 0.0;
+    double confidence = 0.0;
+
+    int symmetry_branch = 0;
+    bool reflected = false;
+};
+```
+
+---
+
+## 4. Match Result
+
+```cpp
+struct CxGeoSO2MatchResult
+{
+    bool executed = false;
+    bool succeeded = false;
+
+    double invariant_distance = 0.0;
+    double low_band_distance = 0.0;
+    double mid_band_distance = 0.0;
+    double high_band_distance = 0.0;
+
+    std::vector<CxGeoSO2PoseHypothesis>
+        pose_hypotheses;
+
+    std::string status;
+    std::string fallback_reason;
+};
+```
+
+---
+
+## 5. FastMatch Evidence
+
+```cpp
+struct CxFastMatchHarmonicEvidence
+{
+    bool executed = false;
+    bool used_for_prefilter = false;
+    bool used_for_seed = false;
+    bool fallback_occurred = false;
+
+    std::string reference_source;
+    std::string observation_source;
+
+    std::string reference_hash;
+    std::string observation_hash;
+
+    int candidate_count_before = 0;
+    int candidate_count_after = 0;
+
+    std::vector<int> retained_candidate_ids;
+    std::vector<double> retained_distances;
+
+    std::vector<CxGeoSO2PoseHypothesis>
+        pose_hypotheses;
+
+    int selected_candidate_id = -1;
+    double selected_angle_deg = 0.0;
+    double selected_scale = 1.0;
+    double selected_confidence = 0.0;
+
+    std::string fallback_reason;
+
+    double descriptor_elapsed_ms = 0.0;
+    double match_elapsed_ms = 0.0;
+};
+```
+
+---
+
+# 十二、参考模型资产化流程
+
+## 当前 Learn 流程
+
+```text
+Directional FindLine
+→ Normal Trace
+→ Reference Shape Model
+→ FormFit Self-observation
+```
+
+## 加入 Harmonic 后
+
+```text
+Directional FindLine
+→ Normal Trace
+→ Build Reference Shape Model
+→ Validate Closed Dense Contour
+→ Canonicalize
+→ Compute SO2 Descriptor
+→ Compute Invariant Bands
+→ Estimate Symmetry
+→ Store Descriptor Asset
+→ FormFit Self-observation
+```
+
+模型资产至少增加：
+
+```json
+{
+  "harmonic": {
+    "schema": "cxgeometry.so2_fourier.v1",
+    "source": "reference_shape_model.dense_points",
+    "sample_count": 256,
+    "max_order": 12,
+    "normalize_scale": true,
+    "reflection_policy": "reject",
+    "symmetry_order": 2,
+    "descriptor_hash": "...",
+    "coefficients_ref": "...",
+    "invariant_ref": "..."
+  }
+}
+```
+
+注意：
+
+```text
+Harmonic Descriptor
+```
+
+属于模型筛选资产，不是量测 Evidence。
+
+---
+
+# 十三、多尺度接入策略
+
+## 1. 第一阶段不要直接修改 `m_models_l*`
+
+P1 先只在：
+
+```text
+m_reference_shape_model
+```
+
+上验证 Harmonic。
+
+原因：
+
+* 它已经有有序 Dense Contour；
+* Closed 状态明确；
+* Centroid、BBox 和法线都已形成；
+* 来源和 Evidence 清楚。
+
+## 2. 第二阶段再审计各层模型
+
+逐层确认：
+
+```text
+m_models_l72[i]
+是否有序？
+是否闭合？
+是否表示边界还是散点？
+是否存在孔洞？
+是否有稳定方向？
+```
+
+只有满足闭合有序轮廓的模型才计算 Descriptor。
+
+## 3. Harmonic Band 与 Grid Level 独立
+
+初始策略可以是：
+
+| Grid Level | Harmonic Band |
+| ---------- | ------------- |
+| L3         | k=1~3         |
+| L6         | k=1~3         |
+| L12        | k=1~6         |
+| L36        | k=1~12        |
+| L72        | k=1~12        |
+
+但该表必须通过实验验证，不作为代码硬编码。
+
+## 4. Route 先反向索引
+
+当前 Route 是 Fine→Coarse 构建。
+
+若需要：
+
+```text
+L3 粗筛
+→ 展开到 L6
+→ 展开到 L12
+```
+
+必须预先生成：
+
+```text
+coarse_to_fine_adjacency
+```
+
+而不能直接使用现有 Map。
+
+---
+
+# 十四、候选筛选流程
+
+建议严格分三个阶段。
+
+## Stage A：低阶不变量粗筛
+
+```text
+候选总数 N
+→ 比较 k=1~3
+→ 保留 Top-K₀
+```
+
+目标是高 Recall，不是极限压缩。
+
+硬 Gate：
+
+```text
+正确候选必须在 Top-K₀ 内
+```
+
+## Stage B：中高阶细筛
+
+```text
+Top-K₀
+→ k=4~12
+→ 保留 Top-K₁
+```
+
+## Stage C：姿态估计
+
+```text
+Top-K₁
+→ Phase / Circular Correlation
+→ 每候选输出多个 Pose Hypothesis
+```
+
+再进入：
+
+```text
+TransformMatch
+→ FormFit
+```
+
+---
+
+# 十五、重复模型与运行时候选去重
+
+## 1. 模型资产去重
+
+保留当前：
+
+```text
+IMAGEFASTMODEL exact equality
+```
+
+新增：
+
+```text
+harmonic invariant distance
+```
+
+形成新的离线报告：
+
+```text
+exact_duplicate_group
+near_shape_duplicate_group
+```
+
+但第一阶段不自动合并，只生成合并候选。
+
+## 2. 运行时候选去重
+
+运行时必须综合：
+
+```text
+position distance
+bbox overlap
+angle difference
+scale difference
+invariant distance
+instance ID
+```
+
+禁止：
+
+```text
+两个候选不变量相同
+→ 直接合并
+```
+
+因为图像中可能存在两个相同零件。
+
+---
+
+# 十六、双等变保险的正式对接
+
+模型侧建议称为：
+
+```text
+C_N / E(2)-equivariant pose model
+```
+
+当前处理的是二维图像，不建议使用 `e3nn/E(3)` 名称，除非未来输入真实三维数据。
+
+## 1. 模型侧输出
+
+```text
+P_model(θ)
+center
+scale
+confidence
+symmetry period
+```
+
+## 2. 几何侧输出
+
+```text
+P_geo(θ)
+invariant distance
+pose hypotheses
+confidence
+symmetry period
+```
+
+## 3. 一致时
+
+将两个圆周分布融合：
+
+$$
+\log P_{fused}(\theta)
+=
+w_m \log P_{model}(\theta)
++
+w_g \log P_{geo}(\theta)
+$$
+
+然后：
+
+```text
+Top angular hypotheses
+→ TransformMatch
+```
+
+不得直接线性平均：
+
+```text
+1° 和 359°
+```
+
+## 4. 冲突时
+
+```text
+角度差超过对称周期下阈值
+或
+任一路置信度低
+```
+
+执行：
+
+```text
+扩大角度搜索范围
+→ RotateMatchAB
+→ 多候选 FormFit
+```
+
+严重冲突：
+
+```text
+PredictiveHypothesis
+或
+Undeterminable
+```
+
+进入人工审核。
+
+---
+
+# 十七、P0：语义审计与 Python 原型
+
+## 目标
+
+不修改 FastMatch 行为，验证二维几何不变量是否具有实际价值。
+
+## 工作 1：当前代码语义审计
+
+必须输出：
+
+```text
+L72/L36/L12/L6/L3 的实际生成过程
+每层模型数量
+每个 PointsShape 是否有序/闭合
+Route Key/Value 真实方向
+Duplicate 当前语义
+m_imagefastmatchlist 当前语义
+Normal Trace / Derived Trace 来源
+```
+
+交付：
+
+```text
+fastmatch_multiscale_semantics.md
+fastmatch_model_inventory.json
+```
+
+## 工作 2：观测轮廓来源审计
+
+确认每类 Case 可提供：
+
+```text
+FindSegmentation contour
+FindObject contour
+Normal Trace source
+RotateMatch candidate contour
+```
+
+交付：
+
+```text
+observation_contour_sources.json
+```
+
+## 工作 3：Python SO(2) 原型
+
+首版实现：
+
+```text
+arc-length resampling
+complex Fourier / EFD
+translation normalization
+optional scale normalization
+cyclic-start invariance
+rotation invariant magnitude
+phase/correlation pose
+symmetry hypotheses
+```
+
+CG/SO(3) 不进入 P0。
+
+## 工作 4：数据集
+
+覆盖：
+
+```text
+0°~360°
+不同尺度
+噪声
+模糊
+低对比度
+部分遮挡
+缺口
+凹形
+孔洞
+开放曲线
+重复对象
+```
+
+## P0 指标
+
+```text
+Invariant distance stability
+Recall@K
+Pose MAE / P95
+False rejection rate
+Symmetry correctness
+Fallback rate
+FastMatch convergence benefit
+```
+
+## P0 硬 Gate
+
+比“压缩 70%”更重要的是：
+
+```text
+正确候选不得被提前过滤
+```
+
+建议第一轮要求：
+
+```text
+Controlled set Recall@K = 100%
+```
+
+或至少不低于 Legacy Candidate Recall。
+
+用户提出的：
+
+```text
+候选减少 70%~80%
+角度 MAE <0.5°
+速度提升 30%
+```
+
+先作为实验目标，不作为未经基线证明的完成事实。
+
+---
+
+# 十八、P1：C++ 模块、资产和 Audit-only 集成
+
+## 1. 实现纯数学模块
+
+```text
+CxGeoSO2Harmonic
+```
+
+禁止依赖 FastMatch。
+
+## 2. Python/C++ 数值对齐
+
+固定输入比较：
+
+```text
+resampled contour
+coefficients
+invariant vector
+distance
+pose hypotheses
+symmetry
+```
+
+## 3. CMake 接入
+
+在：
+
+```cmake
+CXGEOM_SOURCES
+```
+
+增加：
+
+```text
+cxgeom/src/CxGeoSO2Harmonic.cpp
+```
+
+在：
+
+```cmake
+CXIMAGE_CORE_SOURCES
+```
+
+增加：
+
+```text
+cximage/CxFastMatchHarmonicAdapter.cpp
+```
+
+## 4. Model Asset
+
+支持：
+
+```text
+precompute
+serialize
+deserialize
+hash
+schema version
+corrupt asset reject
+```
+
+## 5. Audit-only Mode
+
+```text
+Harmonic 运行
+→ 写 Evidence
+→ 不改变 Legacy Candidate、Seed 和 FormFit
+```
+
+## P1 Gate
+
+```text
+Python/C++ 数值一致
+序列化前后一致
+Legacy FastMatch 结果完全不变
+Evidence 完整
+```
+
+---
+
+# 十九、P2：前筛选、姿态初值和全链路对接
+
+按风险从低到高逐项开启。
+
+## P2.1 Prefilter
+
+```text
+Legacy Candidate Set
+→ Harmonic Top-K
+→ 仍使用原有匹配与 FormFit
+```
+
+失败时自动恢复完整 Candidate Set。
+
+## P2.2 Pose Seed
+
+高置信度结果：
+
+```text
+Harmonic Pose
+→ m_transform_search_initial
+→ runTransformSearch
+→ runFormFitOnImage
+```
+
+中置信度：
+
+```text
+Harmonic Angle
+→ 缩小 RotateMatchAB 区间
+```
+
+低置信度：
+
+```text
+完整 Legacy Search
+```
+
+## P2.3 Route
+
+在确认 Route 方向后：
+
+```text
+Coarse invariant candidate
+→ reverse adjacency
+→ fine candidates
+```
+
+不在 P2 前修改现有 Route Map 存储。
+
+## P2.4 Duplicate
+
+先生成：
+
+```text
+near_duplicate_report
+```
+
+后续再决定是否参与自动抑制。
+
+## P2 Gate
+
+必须同时满足：
+
+```text
+Top-K Recall 不下降
+最终 FormFit 成功率不下降
+最终量测误差不增加
+运行时间有实际收益
+所有 Fallback 可追踪
+```
+
+---
+
+# 二十、P3：CxGeoMetry 模型包和性能演进
+
+## 1. 模型包
+
+把 Harmonic Descriptor 纳入：
+
+```text
+Immutable Model Graph
+```
+
+但保持：
+
+```text
+Reference Harmonic Asset
+Runtime Observation Descriptor
+Runtime Match Result
+```
+
+三个对象分离。上传材料也明确要求模型原型图、运行观察图和运行结果图不能混成同一容器。
+
+## 2. 可选 SO(2) Bispectrum
+
+只有低阶/高阶幅值不能区分相似零件时再加入。
+
+## 3. SIMD / FFT
+
+由于：
+
+```text
+N≈128~512
+max_order≈8~16
+```
+
+直接 `O(NK)` 计算可能已经足够。
+
+应先 Profiling，再决定：
+
+```text
+SIMD
+FFT
+Batch Tensor
+CUDA
+```
+
+## 4. CUDA
+
+只有出现：
+
+```text
+大量 ROI
+大量候选模型
+大批量 Descriptor 比较
+```
+
+并且 CPU 计算成为瓶颈时，才迁移到 CxGeoMetry Tensor/CUDA 路线。
+
+不能因为数学名称“谐波”就直接写 GPU Kernel。
+
+---
+
+# 二十一、单元测试矩阵
+
+## 1. 基础不变性
+
+```text
+Translation
+Scale
+Rotation
+Cyclic Start Index
+Sampling Density
+Clockwise / Counter-clockwise
+```
+
+## 2. Reflection
+
+明确配置：
+
+```text
+Mirror is same class
+或
+Mirror is different class
+```
+
+工业零件中镜像经常是不同对象，默认建议：
+
+```text
+allow_reflection = false
+```
+
+## 3. 对称性
+
+```text
+Circle
+Ellipse
+Rectangle
+Square
+Regular Polygon
+Asymmetric Part
+```
+
+## 4. 几何复杂度
+
+```text
+Convex
+Concave
+Hole
+Multiple Components
+Open Curve
+Partial Contour
+```
+
+## 5. 干扰
+
+```text
+Noise
+Blur
+Outlier Points
+Missing Segment
+Non-uniform Sampling
+Contour Jitter
+```
+
+## 6. 数值一致性
+
+```text
+Python vs C++
+Save vs Reload
+Debug vs Release
+x64 deterministic repeat
+```
+
+---
+
+# 二十二、集成测试矩阵
+
+每个 Case 比较：
+
+```text
+Legacy
+Harmonic Audit
+Harmonic Prefilter
+Harmonic Seed
+Model G-CNN Seed
+Dual Seed
+```
+
+指标：
+
+```text
+候选数量
+正确候选 Rank
+Recall@K
+角度误差
+Scale 误差
+Transform Search Candidate Count
+Transform Search Time
+FormFit Iterations
+FormFit Residual
+Convergence Rate
+Wrong-edge Rate
+最终量测误差
+P50 / P95 总时间
+```
+
+---
+
+# 二十三、Evidence 最低字段
+
+```text
+harmonic_schema
+descriptor_source
+reference_model_id
+reference_hash
+observation_source
+observation_hash
+
+closed_contour
+sample_count
+max_order
+normalization_policy
+reflection_policy
+symmetry_order
+
+low_band_distance
+mid_band_distance
+high_band_distance
+
+candidate_count_before
+candidate_count_after
+retained_candidate_ids
+
+pose_hypotheses
+selected_angle
+selected_scale
+pose_confidence
+pose_ambiguity
+
+seed_target
+transform_search_range
+fallback_occurred
+fallback_reason
+
+descriptor_elapsed_ms
+prefilter_elapsed_ms
+pose_elapsed_ms
+
+final_formfit_status
+final_formfit_residual
+final_measurement_status
+```
+
+必须能够回答：
+
+```text
+轮廓来自哪里？
+用了哪个模型描述子？
+过滤掉了哪些候选？
+为什么保留当前候选？
+姿态来自模型、几何还是融合？
+是否发生回退？
+最终量测是否依赖 Harmonic？
+```
+
+---
+
+# 二十四、后续线程建议
+
+## Thread A：FastMatch 语义审计
+
+输出：
+
+```text
+L-level 真实语义
+Route 真实方向
+Candidate/Feature 容器语义
+Contour Source Matrix
+```
+
+## Thread B：Python SO(2) 原型
+
+输出：
+
+```text
+Fourier/EFD Baseline
+Invariant
+Pose
+Symmetry
+Controlled Report
+```
+
+## Thread C：C++ Pure Math
+
+输出：
+
+```text
+CxGeoSO2Harmonic
+Unit Tests
+Python Parity
+```
+
+## Thread D：Reference Asset
+
+输出：
+
+```text
+Descriptor Precompute
+Serialization
+Hash
+Model Package Extension
+```
+
+## Thread E：FastMatch Audit Adapter
+
+输出：
+
+```text
+Audit Evidence
+No Behavior Change
+```
+
+## Thread F：Prefilter
+
+输出：
+
+```text
+Top-K
+Recall Gate
+Fallback
+```
+
+## Thread G：Pose Seed
+
+输出：
+
+```text
+FastMatchTransform
+TransformMatch Range
+RotateMatchAB Narrowing
+```
+
+## Thread H：Multiscale / Duplicate
+
+在 Route 审计完成后开启。
+
+## Thread I：双路姿态融合
+
+输出：
+
+```text
+P_model(θ)
+P_geo(θ)
+P_fused(θ)
+Conflict Policy
+```
+
+## Thread J：CxGeoMetry Tensor/CUDA
+
+仅在 CPU 路线证明性能瓶颈后开启。
+
+---
+
+# 二十五、开发约束基线
+
+1. **当前二维 FastMatch 优先实现 SO(2) Fourier/EFD，不直接实现 SO(3) 球谐。**
+
+2. **完整 CG/Wigner D 只用于未来真实三维数据。**
+
+3. **不变量和姿态系数必须分开保存。**
+
+4. **功率谱不得被用于宣称可以直接恢复角度。**
+
+5. **`r(θ)` 不得作为凹形、孔洞和开放曲线的唯一表达。**
+
+6. **L72/L36/L12/L6/L3 是 Grid Level，不是 Harmonic Order。**
+
+7. **Route 使用前必须审计实际 Key/Value 方向。**
+
+8. **`m_imagefastmatchlist` 不得被当成 Harmonic Top-K 容器。**
+
+9. **现有 `m_duplicates_list_*` 的 exact-equality 语义不得被静默改变。**
+
+10. **Harmonic Descriptor 首先只接 Reference Shape Model，不立即覆盖所有 `m_models_l*`。**
+
+11. **Derived Trace 可用于模型筛选，但不得成为量测 Evidence。**
+
+12. **运行时 Harmonic Observation 必须独立于 FormFit Seed。**
+
+13. **高置信度 Harmonic Pose 优先进入 TransformMatch，而不是重新实现搜索器。**
+
+14. **低置信度和开放轮廓必须显式回退 Legacy Search。**
+
+15. **前筛选首先保证正确候选 Recall，不优先追求压缩比例。**
+
+16. **姿态结果必须支持对称多假设。**
+
+17. **两个相同形状但不同位置的实例不得因不变量相同而合并。**
+
+18. **P1 只能 Audit，不改变正式结果。**
+
+19. **P2 启用行为变更前必须具有固定回归。**
+
+20. **最终量测仍由 Normal Trace、FormFit、Calibration 和 Gate 决定。**
+
+21. **模型侧应称为 C_N/E(2) 等变；除非有真实 3D 数据，不使用 E(3)/e3nn 定位。**
+
+22. **未通过 CPU 正确性和端到端收益验证，不推进 CUDA。**
+
+---
+
+# 二十六、最终推进顺序
+
+```text
+当前 FastMatch 语义审计
+        ↓
+确定闭合轮廓和观测来源
+        ↓
+Python SO(2) Fourier / EFD 原型
+        ↓
+不变量粗筛验证
+        ↓
+相位 / 循环相关姿态验证
+        ↓
+C++ 纯数学模块
+        ↓
+Reference Descriptor 资产化
+        ↓
+Audit-only FastMatch 集成
+        ↓
+Prefilter Top-K
+        ↓
+Harmonic Pose → TransformMatch Seed
+        ↓
+RotateMatchAB Fallback
+        ↓
+Shape Model FormFit
+        ↓
+Normal Trace / Geometry / Measurement
+        ↓
+多尺度 Route 接入
+        ↓
+模型资产 Near-duplicate 报告
+        ↓
+模型侧 G-CNN / 几何侧 Harmonic 双路融合
+        ↓
+CxGeoMetry Model Package
+        ↓
+必要时 SO(2) Bispectrum
+        ↓
+Profiling 后决定 SIMD / Tensor / CUDA
+```
+
+---
+
+# 最终判断
+
+这项扩充最合理的定义不是：
+
+```text
+给 FastMatch 加一套球谐网络
+```
+
+而是：
+
+> **给 FastMatch 增加一套二维轮廓的旋转不变量和姿态假设生成器，在不改变现有精密拟合核心的前提下，提前过滤不相关原型、缩小角度搜索范围，并为 TransformMatch/FormFit 提供可追溯的连续姿态初值。**
+
+最终双路关系应冻结为：
+
+```text
+模型侧 C_N / E(2) G-CNN
+→ 从图像特征得到姿态分布
+
+几何侧 SO(2) Fourier / EFD
+→ 从轮廓形状得到不变量和姿态假设
+
+两者一致
+→ 窄范围 TransformMatch
+
+两者冲突
+→ RotateMatchAB / 多假设搜索 / 人工审核
+
+最终
+→ Normal Trace + FormFit + Calibration
+```
+
+这样既能实现你提出的“特征等变 + 几何不变”双保险，又不会把当前二维 FastMatch 过早复杂化成不必要的 SO(3) 球谐系统。
+ 
+
+
+
+

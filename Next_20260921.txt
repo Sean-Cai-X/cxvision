@@ -1,0 +1,2473 @@
+### 方案定位与边界（先对齐当前项目架构）
+
+结合当前 `codex/cxcore-integration` 分支的代码结构与五级边界链定义，**e3cnn（E(2) 连续等变卷积）的嵌入严格限定在「模型感知层」内部**，属于原生几何回归头的一种技术实现方案，不越界到计量层，不替代 FastMatch 的最终几何兜底，不破坏现有主干链路。
+
+| 层级 | 对应模块 | e3cnn 定位 | 严格边界 |
+| --- | --- | --- | --- |
+| Level 3 模型感知层 | `libtorch_module` / YOLOv8-Seg | 替换中高层卷积，新增连续角度提取头，输出**粗姿态先验** | 只输出 coarse_pose + 置信度，不输出最终计量值；不修改分割/检测主干逻辑 |
+| Level 4 边缘观察层 | `cximage` / FastMatch / Normal Trace | e3cnn 输出作为搜索初始化初值 | 最终边缘、法线、亚像素精度仍由 Normal Trace 提取 |
+| Level 5 量测判定层 | `cxgeom` / PredictiveGate | 不参与 | 最终几何拟合、标定、合格判定仍由传统几何链完成 |
+
+和当前代码的对应关系：
+
+- 实验原型先在 `libtorchsegmentation`（模型结构参考层）中验证，不侵入主工程；
+- 正式集成落在 `libtorch_module`（唯一正式模型边界），不渗透到 `cximage` 应用层；
+- 输出接口对齐现有 `YoloV8SegRawOutput` 的扩展位，FindSegmentation 无需重构即可读取粗姿态。
+
+---
+
+## 一、核心替换策略：只换敏感层，不重构主干
+
+e3cnn 是**连续旋转等变卷积**，基于 steerable 谐波核实现，特征图随目标旋转连续同步变换，没有离散 G-CNN 的分箱误差，角度输出天然平滑，更适合工业姿态场景。但计算复杂度高于离散方案，因此必须**最小范围替换**，只在旋转敏感的中高层卷积替换，底层纹理卷积完全保留。
+
+### 1. YOLOv8 各层替换决策
+
+| YOLOv8 结构 | 层级 | 替换策略 | 原因 |
+| --- | --- | --- | --- |
+| Backbone P1 / P2 | 底层 | **不替换**，保留标准 Conv | 提取纹理、梯度、明暗等基础特征，旋转敏感性极低，替换无收益，徒增算力 |
+| Backbone P3 / P4 / P5 | 中高层 | C2f 模块内的 3×3 卷积替换为 E(2)-Conv | 提取轮廓、形状、部件结构，旋转敏感性最高，是等变特性的核心生效层 |
+| Neck PAN / FPN | 多尺度融合 | 上采样/下采样保留，融合卷积替换为 E(2)-Conv | 保证跨尺度特征的旋转一致性，避免融合破坏等变特性 |
+| 分割头 / 检测头 | 输出头 | 主体保留，新增并行角度提取分支 | 原有 Mask、Class、Box 分支不动，新增独立 Angular Extraction Head |
+
+### 2. e3cnn 核函数选型（工程落地优先）
+
+| 选型 | 阶数 L | 旋转表达 | 计算量 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| 轻量版 | L=2 | 2 阶谐波，近似连续 | 约为标准卷积的 2.5 倍 | 开发验证、姿态大致固定场景 |
+| 标准版 | L=4 | 4 阶谐波，连续精度高 | 约为标准卷积的 4~5 倍 | 正式生产、全角度旋转场景 |
+| 高精度版 | L=6 | 6 阶谐波，亚角度精度 | 约 7~8 倍 | 超高精度姿态测量，普通计量不推荐 |
+
+> 
+> 工程建议：第一阶段用 **L=2 轻量版**做原理验证，确认收益后再升级到 L=4 标准版；L=6 工业场景性价比极低，不推荐。
+
+---
+
+## 二、连续角度提取头设计（E2-Angular Head）
+
+e3cnn 的核心优势是**角度信息编码在特征相位中**，不需要离散分箱+插值，直接解码连续角度。输出结构严格对齐现有粗姿态接口，下游 FastMatch 零修改接入。
+
+### 1. 解码流程
+
+```
+输入：E(2)-Conv 输出的等变特征图 [B, C, H, W]
+      （特征通道携带旋转相位信息）
+    ↓
+1. 实例区域池化
+   用实例 Mask 做加权池化，得到每个实例的等变特征向量 [B, N, C]
+   （N 为实例数，保留空间加权的相位信息）
+    ↓
+2. 相位角度解码
+   对特征向量做傅里叶空间角度估计，直接输出连续角度 θ ∈ [0, 2π)
+   同时输出角度置信度 angle_confidence（相位响应强度）
+    ↓
+3. 粗几何参数解码
+   结合对应旋转相位的特征幅值，解码：
+   - 中心偏移 center_dx / center_dy
+   - 粗尺寸 size_a / size_b（长短轴/半径）
+   - 几何质量评分 geometry_quality
+    ↓
+输出：coarse_pose {
+    center_x, center_y,
+    angle,          // 连续值，无分箱误差
+    size_a, size_b,
+    angle_confidence,
+    geometry_quality
+}
+```
+
+### 2. 和现有代码的接口兼容
+
+直接扩展当前 `YoloV8SegRawOutput` 结构体，新增字段，完全向后兼容：
+
+```
+struct YoloV8SegRawOutput {
+    // 原有字段
+    std::vector<CxTorchDetection> detections;
+    std::vector<torch::Tensor> mask_coefficients;
+    // ...
+
+    // 新增 e3cnn 原生几何输出
+    std::vector<CxTorchInstancePose> instance_poses;
+};
+```
+
+`CxTorchInstancePose` 直接对接到 FindSegmentation 的 `primitive_hypotheses` 输入，作为 FastMatch 的初始变换初值，不需要修改应用层逻辑。
+
+---
+
+## 三、分阶段嵌入流程（严格对齐当前项目模块边界）
+
+完全遵循「参考层实验 → 正式层集成 → 应用层对接」的顺序，和现有代码的模块职责完全匹配，风险逐级可控。
+
+### 阶段 0：原理验证（在 `libtorchsegmentation` 中完成）
+
+**定位**：模型结构参考层实验，不侵入 `libtorch_module` 主工程，符合当前代码中「libtorchsegmentation 做结构参考，不做正式运行路径」的定位。
+
+**工作内容**：
+
+1. 引入 e3cnn 基础库，实现最小 E(2)-Conv 算子；
+2. 取 YOLOv8 单个 C2f 模块做替换验证，用合成旋转样本（圆/椭圆）测试等变一致性；
+3. 实现最小角度解码头，验证连续角度输出的精度、平滑性。
+
+**验收标准**：
+
+- 0°~360° 连续旋转，特征响应的相位与角度线性相关，R² > 0.99；
+- 角度 MAE < 0.5°，远优于原生 OBB 的后处理精度；
+- 不出现轴互换、角度跳变等原生 OBB 的典型问题。
+
+**边界**：仅在 `libtorchsegmentation` 目录内开发，不修改 `libtorch_module`、不碰 CMake 主构建、不影响现有链路。
+
+---
+
+### 阶段 1：模块集成（在 `libtorch_module` 中完成）
+
+**定位**：正式模型边界内集成，对应 Production Dispatcher 任务路由，可训练可推理。
+
+**工作内容**：
+
+1. 按替换策略，替换 Backbone P3-P5 与 Neck 融合层的 3×3 卷积为 E(2)-Conv（L=2 起步）；
+2. 实现完整 E2-Angular Head，接入 `YoloV8SegRawOutput`；
+3. 扩展训练损失函数，新增：
+   - **等变一致性损失**：输入旋转 α，特征相位同步旋转 α，保证等变特性；
+   - **角度平滑损失**：监督连续角度输出，用 FormFit 精标做真值；
+   - **几何一致性损失**：约束角度、尺寸与 Mask 轮廓的几何匹配。
+4. 在 Production Dispatcher 中新增任务路由：`yolov8_seg_e2_geometry`，和原有 `backward_smoke` 并行。
+
+**验收标准**：
+
+- 原有分割精度（mIoU）下降 < 1%，不破坏主干能力；
+- 全角度范围内角度 MAE < 1°，旋转稳定性显著优于原生后处理 OBB；
+- 训练链路完整跑通，Checkpoint 可正常保存加载。
+
+**边界**：
+
+- 不修改 `cximage` / `FindSegmentation` 应用层代码；
+- 保留原有标准卷积实现，通过编译开关切换 E2 模式，默认关闭；
+- 严格符合「Model Runtime Foundation / Model Algorithm 两层分开」的架构规则。
+
+---
+
+### 阶段 2：应用链路对接（打通到 FindSegmentation）
+
+**定位**：应用层交汇点对接，输出对齐几何计算输入，不修改几何计算本身。
+
+**工作内容**：
+
+1. `FindSegmentation` 读取 `instance_poses` 字段，写入 `primitive_hypotheses` 的初始姿态；
+2. FastMatch 接收模型粗姿态作为初始变换，缩小法线搜索范围，减少迭代次数；
+3. 新增姿态来源标记：`angle_source = e2cnn_native_geometry`，和原有 `postprocess_not_native_angle_regression` 区分。
+
+**验收标准**：
+
+- FastMatch 收敛迭代次数减少 30% 以上，复杂场景失败率下降；
+- 最终计量精度和纯 FastMatch 方案持平，不降低精度底线；
+- 证据链完整记录姿态来源，可追溯、可对比。
+
+**边界**：
+
+- 不修改 FastMatch 核心几何拟合逻辑；
+- 模型姿态永远是「初值/先验」，不参与最终计量判定；
+- 最终 Gate 判定仍然以 Normal Trace + FormFit 的图像证据为准。
+
+---
+
+### 阶段 3：生产级优化与验证
+
+**定位**：双轨通道对齐，开发通道验证，生产通道审慎接入。
+
+**工作内容**：
+
+1. 推理优化：训练用 L=4 保证精度，推理降阶到 L=2 或动态相位截断，控制计算量；
+2. 双轨适配：开发通道默认开启 e3cnn 做快速验证，生产通道作为可选增强模型，走完整准入流程；
+3. 全量验证：通过 G1 合成样本、G2 真实样本、G3 全链路三级 Gate 验证。
+
+**验收标准**：
+
+- 推理延迟增长 < 50%，满足工业节拍；
+- 旋转场景下全链路通过率显著提升；
+- 所有结果可解释、可追溯、证据完整。
+
+---
+
+## 四、训练体系对齐（复用现有数据与工具链）
+
+完全复用当前已有的受控几何资产、三级标注监督、训练调度体系，不另起炉灶。
+
+1. **预训练阶段**：Magic Wand 粗标 + 全角度旋转增广
+   - 损失：Mask 损失 + 分类损失 + 等变一致性损失
+   - 目标：让 E(2) 卷积先学会旋转等变的特征提取
+2. **精调阶段**：FormFit 几何精标
+   - 损失：角度平滑 L1 损失 + 尺寸损失 + 几何一致性损失
+   - 目标：训练角度提取头，输出准确的连续粗姿态
+3. **校准阶段**：Normal Trace 计量点云
+   - 损失：亚角度偏移校准损失 + 法线方向一致性损失
+   - 目标：把模型输出角度和计量级真值对齐，输出系统偏差
+
+> 
+> 完全对应当前「受控几何资产已实现、几何训练合同已定义、Pending Model Binding」的状态，e3cnn 就是把合同绑定到真实模型结构的一种技术路径。
+
+---
+
+## 五、工程风险与权衡控制
+
+1. **计算量风险**
+   - 风险：e3cnn 计算量高于标准卷积，全层替换会导致训练推理变慢。
+   - 控制：只替换中高层、起步用 L=2 轻量版、推理降阶、动态开关；简单场景仍用原生 OBB，复杂场景才触发 e3cnn。
+2. **依赖与兼容性风险**
+   - 风险：e3cnn 第三方库与 LibTorch 版本、TorchScript 导出兼容性问题。
+   - 控制：先在 `libtorchsegmentation` 做原型验证，确认可导出、可部署再推进主工程；保留原生实现兜底，编译开关切换。
+3. **越界风险**
+   - 风险：误把模型原生角度当最终计量结果，破坏证据链。
+   - 控制：严格标记姿态来源，Gate 判定永远以图像边缘证据为准；模型输出只做初值，不参与最终合格判定。
+4. **架构污染风险**
+   - 风险：为了 e3cnn 打乱现有模块边界、引入第二套运行时。
+   - 控制：严格限定在 `libtorch_module` 内，复用现有 Dispatcher、FindSegmentation、FastMatch 链路，不新增独立运行路径。
+
+---
+
+## 最终总结
+
+e3cnn 嵌入不是推翻现有架构，而是**在现有模型边界内，给几何感知能力做一次连续等变升级**——用最小范围的卷积替换，换来原生、平滑、稳定的连续角度输出，给下游 FastMatch 提供更准的初值、更小的搜索范围、更低的失败率。
+
+契合当前项目的节奏：
+
+- 对应 P4 优先级「量测模型算法层」中的 Geometry Head 实现；
+- 遵循「参考层实验 → 正式层集成 → 应用层对接」的工程路径；
+- 不破坏五级边界链、不越位计量、不替代 FastMatch 的核心兜底。
+
+
+# YOLOv8-Seg E(2) 等变粗姿态分支：Torch 侧代码落地与验证流程
+
+## 1. 项目定位
+
+本次工作不改变五级边界链：
+
+```text
+Level 1 标注候选层
+Magic Wand / Weak Mask
+
+Level 2 几何参考层
+Prompt FormFit / Controlled Geometry
+
+Level 3 模型感知层
+YOLOv8-Seg + E(2) Equivariant Pose
+
+Level 4 边缘观察层
+FastMatch / FindLine / Normal Trace
+
+Level 5 量测判定层
+FormFit / Calibration / Predictive Geometry Gate
+```
+
+E(2) 等变网络只负责：
+
+```text
+目标发现
+实例分割
+粗中心
+粗尺度
+粗角度
+角度置信度
+姿态不确定度
+```
+
+它不负责：
+
+```text
+最终边缘坐标
+亚像素点
+最终圆心/半径/轴长
+最终角度
+正式公差结论
+```
+
+完整运行链固定为：
+
+```text
+YOLOv8-Seg E(2) Pose
+        ↓
+Instance Mask + Coarse Pose
+        ↓
+FastMatch Search Seed
+        ↓
+Normal Trace
+        ↓
+FormFit / Geometry Fit
+        ↓
+Calibration
+        ↓
+Predictive Geometry Gate
+        ↓
+DirectMeasurement
+ClampedMeasurement
+PredictiveHypothesis
+Undeterminable
+```
+
+模型粗姿态在没有独立图像边缘证据前，始终属于：
+
+```text
+PredictiveHypothesis
+```
+
+---
+
+# 2. 名称与技术路线修正
+
+## 2.1 项目命名
+
+当前处理的是二维图像平面中的：
+
+```text
+平移
+平面旋转
+可选镜像
+```
+
+因此代码和文档建议使用：
+
+```text
+E2Steerable
+SO2Equivariant
+E2Pose
+```
+
+不建议使用：
+
+```text
+e3cnn
+```
+
+作为模块名。
+
+推荐正式命名：
+
+```text
+YoloV8SegE2Pose
+E2SteerableConv2d
+E2AngularHead
+E2FieldSpec
+E2EquivarianceLoss
+```
+
+官方 `escnn` 使用 Field Type 和 Geometric Tensor 描述特征场的变换规律，并提供满足对应群表示约束的卷积、归一化和非线性；这说明连续等变网络并不是“普通 Tensor 加几个可旋转卷积核”，而是整条等变支路必须携带明确的 Field Type。
+
+## 2.2 连续等变并不等于无误差连续旋转
+
+E(2)-Steerable 网络在连续空间中满足旋转等变约束，但实际图像采样在像素网格上，任意角度旋转仍会产生插值和离散化误差。官方 `escnn` 也明确指出，像素网格无法实现完全精确的连续旋转，特征响应仍会出现离散化波动。
+
+因此以下表述不应作为工程承诺：
+
+```text
+没有分箱误差
+天然达到亚角度精度
+完全消除旋转漂移
+```
+
+更准确的目标是：
+
+```text
+减少角度回归对统计插值的依赖
+提高全角度特征规律性
+降低轴交换和大角度跳变
+输出连续、可校准的姿态分布
+```
+
+---
+
+# 3. 当前代码基线
+
+## 3.1 当前 YOLOv8-Seg 网络结构
+
+当前 `YoloV8SegmentImpl` 为标准普通卷积结构：
+
+```text
+m0 / m1         ConvModule
+m2              C2f
+m3              Downsample Conv
+m4              C2f
+m5              Downsample Conv
+m6              C2f
+m7              Downsample Conv
+m8              C2f
+m9              SPPF
+
+m10~m21         PAN/FPN + C2f
+
+m22             Segment Head
+```
+
+Head 接收：
+
+```text
+P3 = x15
+P4 = x18
+P5 = x21
+```
+
+并输出：
+
+```cpp
+struct YoloV8SegRawOutput
+{
+    std::vector<torch::Tensor> box_logits;
+    std::vector<torch::Tensor> class_logits;
+    std::vector<torch::Tensor> mask_coefficients;
+    torch::Tensor prototypes;
+};
+```
+
+当前不存在：
+
+```text
+orientation feature
+angle distribution
+coarse pose
+geometry quality
+pose uncertainty
+```
+
+输出。
+
+## 3.2 当前已完成的训练基础
+
+当前代码已经具备：
+
+```text
+Task-Aligned Assignment
+P3/P4/P5 全局 Anchor 表
+Class / Box / DFL / Mask 共用 assigned_gt_indices
+Mask BCE + Dice
+Adam optimizer.step()
+Checkpoint
+Training Trace
+```
+
+当前训练路径会构建全部尺度的 Anchor 表，再通过 `TaskAlignedAssigner` 获得 `assigned_gt_indices`；正样本的 Mask Coefficient、Box、DFL 和类别监督都使用同一 GT 索引，因此不需要再新建一套平行 Assignment。
+
+当前 Mask Loss 已经包括：
+
+```text
+BCEWithLogits
++
+Dice × mask_dice_loss_weight
+```
+
+。
+
+## 3.3 当前几何 Target 已准备，但尚未进入 Loss
+
+当前 Geometry Target 已能够表达：
+
+```text
+primitive_type
+center_x
+center_y
+envelope_width
+envelope_height
+sin_angle
+cos_angle
+valid_mask
+```
+
+。
+
+但是当前 `LossTensors` 只有：
+
+```text
+total_loss
+box_loss
+class_loss
+dfl_loss
+mask_loss
+```
+
+没有：
+
+```text
+angle_loss
+equivariance_loss
+pose_loss
+geometry_loss
+uncertainty_loss
+```
+
+。
+
+Training Trace 也明确标记：
+
+```text
+geometry_target_tensor.status
+=
+prepared_not_loss_consumed
+```
+
+说明几何目标已经进入数据准备层，但还没有真正参与模型训练。
+
+## 3.4 当前最关键的数据问题
+
+当前 `YoloV8SegDatasetSample` 可以保存多个：
+
+```text
+boxes
+polygons
+classes
+```
+
+但只保存一套：
+
+```text
+geometry_primitive_type
+geometry_target_values[6]
+geometry_target_valid[6]
+```
+
+。
+
+这意味着：
+
+```text
+一张图片中存在多个实例
+```
+
+时，当前代码无法为每个实例分别表达：
+
+```text
+自己的中心
+自己的尺寸
+自己的角度
+自己的几何类型
+自己的标注质量
+```
+
+所以在实现 E(2) 角度头之前，**必须先完成实例级 Geometry Target 重构**。
+
+---
+
+# 4. 总体实施路线
+
+建议分为两代模型。
+
+## 4.1 V1：冻结当前标准模型
+
+保留：
+
+```text
+YoloV8SegmentImpl V1
+```
+
+用于：
+
+```text
+现有权重兼容
+现有推理回归
+现有训练回归
+现有 Mask / Detection Baseline
+现有 FastMatch 对比
+```
+
+禁止直接在 V1 上原位替换卷积。
+
+## 4.2 V2A：并行 E(2) Pose Tower
+
+第一阶段建立：
+
+```text
+Existing YOLOv8-Seg V1
+        ├─ Box
+        ├─ Class
+        ├─ Mask Coefficients
+        └─ Proto
+
+Parallel E2 Pose Tower
+        ├─ E2 Feature P3
+        ├─ E2 Feature P4
+        ├─ E2 Feature P5
+        └─ E2 Angular Head
+```
+
+输出：
+
+```text
+V1 Instance Result
++
+E2 Coarse Pose
+```
+
+优点：
+
+```text
+不破坏 V1 权重
+不改变现有分割主干
+可独立开关
+可独立训练
+容易做消融
+失败时可完全回滚
+```
+
+## 4.3 V2B：集成式中高层等变网络
+
+只有 V2A 证明：
+
+```text
+角度更稳
+FastMatch 搜索范围缩小
+收敛更快
+失败率降低
+最终量测不退化
+```
+
+后，才推进：
+
+```text
+P3 / P4 / P5 C2f
+→ E2 C2f
+
+Neck Fusion
+→ E2 Fusion
+
+E2 Feature
+→ Segmentation Invariant Head
++
+Angular Equivariant Head
+```
+
+---
+
+# 5. Phase 0：参考原型与代码边界
+
+## 5.1 Python 参考原型
+
+`escnn` 可以用于：
+
+```text
+Field Type 设计
+最大频率选择
+等变算子数值参考
+连续角度解码实验
+受控数据验证
+```
+
+但不建议直接成为生产 C++ Runtime 依赖。
+
+原因：
+
+* `escnn` 是 Python/PyTorch 扩展；
+* 只有部分常见模块支持 `.export()`；
+* 当前 C++ 网络是手写 LibTorch Module；
+* 完整 YOLO 自定义结构不应假设能够无损自动导出。
+
+建议目录：
+
+```text
+tools/equivariant_reference/
+├─ escnn_operator_reference.py
+├─ escnn_pose_tower_reference.py
+├─ export_golden_tensors.py
+├─ controlled_rotation_eval.py
+└─ reference_cases/
+```
+
+该目录只生成：
+
+```text
+Golden Input
+Golden Output
+Field Specification
+Equivariance Error
+Angle Result
+```
+
+不直接进入生产部署。
+
+## 5.2 `libtorchsegmentation` 中的实验
+
+`libtorchsegmentation` 已经定义：
+
+```cpp
+features()
+features_at()
+```
+
+适合作为模型 Stage 实验和中间 Feature 验证参考。
+
+建议增加独立实验开关：
+
+```cmake
+LIBTORCHSEGMENTATION_ENABLE_E2_EXPERIMENT=OFF
+```
+
+实验内容限定为：
+
+```text
+一个 E2 Conv Block
+一个 E2 C2f Prototype
+一个 Angular Head
+Synthetic Rotation Test
+```
+
+不修改正式 DeepLab 或其他模型。
+
+## 5.3 Phase 0 Gate
+
+必须证明：
+
+```text
+Python Reference
+与
+C++ LibTorch Operator
+
+在固定输入上：
+Shape 一致
+相位一致
+旋转规律一致
+梯度有限
+序列化可恢复
+```
+
+---
+
+# 6. Phase 1：实例级 Geometry Target 重构
+
+这是所有后续工作的前置条件。
+
+## 6.1 新数据结构
+
+建议新增：
+
+```cpp
+struct YoloV8SegInstanceTarget
+{
+    int64_t class_id = -1;
+
+    std::array<float, 4> box_xyxy_norm;
+    std::vector<cv::Point2f> polygon_norm;
+    std::string mask_ref;
+
+    int primitive_type = -1;
+
+    std::array<float, 6> geometry_values{};
+    std::array<uint8_t, 6> geometry_valid{};
+
+    int orientation_symmetry_order = 1;
+    bool angle_valid = false;
+
+    float visibility_ratio = 1.0f;
+    float supervision_weight = 1.0f;
+
+    std::string annotation_source;
+    std::string measurement_ref;
+};
+```
+
+修改：
+
+```cpp
+struct YoloV8SegDatasetSample
+{
+    std::string image_id;
+    std::string image_ref;
+    std::string split;
+
+    std::vector<YoloV8SegInstanceTarget> instances;
+};
+```
+
+## 6.2 对称周期
+
+每个几何实例必须声明：
+
+```text
+orientation_symmetry_order
+```
+
+推荐：
+
+| 几何        | 对称阶数 q | 有效角度周期 |
+| --------- | -----: | -----: |
+| 非对称有方向对象  |      1 |   360° |
+| 直线        |      2 |   180° |
+| 长方形 / OBB |      2 |   180° |
+| 椭圆        |      2 |   180° |
+| 正方形       |      4 |    90° |
+| 圆         |      0 |   角度无效 |
+| 有方向圆弧     |      1 |   360° |
+
+圆必须：
+
+```text
+angle_valid = false
+```
+
+不得强制训练随机角度。
+
+## 6.3 与现有 Assignment 对齐
+
+现有：
+
+```text
+positive_gt_indices
+```
+
+已经能为每个正 Anchor 找到对应 GT Instance。
+
+新增：
+
+```text
+positive_pose_targets
+positive_angle_valid
+positive_symmetry_order
+positive_geometry_quality
+```
+
+应通过：
+
+```cpp
+positive_gt_indices
+```
+
+从实例 Target 中统一索引。
+
+必须保证同一正样本的：
+
+```text
+Class
+Box
+Mask
+Angle
+Geometry Type
+```
+
+全部属于同一个 GT Instance。
+
+## 6.4 数据包 Schema
+
+当前训练包建议从：
+
+```text
+cxvision.yolov8n_aabb_mask_package.v1
+```
+
+升级为：
+
+```text
+cxvision.yolov8seg_geometry_package.v2
+```
+
+每个 Instance 至少包含：
+
+```json
+{
+  "instance_id": "part_001",
+  "class_id": 0,
+  "bbox": [x0, y0, x1, y1],
+  "polygon": [],
+  "primitive_type": "ellipse",
+  "center": [cx, cy],
+  "size": [a, b],
+  "angle_rad": 1.0472,
+  "symmetry_order": 2,
+  "angle_valid": true,
+  "annotation_source": "formfit_reviewed",
+  "supervision_weight": 1.0
+}
+```
+
+---
+
+# 7. Phase 2：C++ E(2) Field Contract
+
+连续 Steerable CNN 不能只用“通道数”描述 Feature。
+
+应新增 Field 元数据：
+
+```cpp
+struct E2IrrepSpec
+{
+    int frequency = 0;
+    int multiplicity = 0;
+    bool reflection_even = true;
+};
+
+struct E2FieldSpec
+{
+    std::vector<E2IrrepSpec> irreps;
+
+    int tensor_channels() const;
+    std::string fingerprint() const;
+};
+```
+
+## 7.1 SO(2) 还是 O(2)
+
+第一阶段建议使用：
+
+```text
+SO(2)
+```
+
+只处理旋转，不把镜像作为等价变换。
+
+原因：
+
+```text
+很多工业零件的左右镜像不是同一个零件
+```
+
+只有业务明确规定镜像等价时，才考虑：
+
+```text
+O(2)
+```
+
+## 7.2 Frequency 配置
+
+用户提出的：
+
+```text
+L=2 / L=4 / L=6
+```
+
+建议改为：
+
+```text
+max_frequency = 1 / 2 / 4
+```
+
+以及各 Frequency 的 Multiplicity。
+
+例如：
+
+```text
+scalar frequency 0 × 16
+vector frequency 1 × 8
+frequency 2 × 8
+frequency 4 × 4
+```
+
+计算成本取决于：
+
+```text
+Field Type
+Multiplicity
+Kernel Basis Dimension
+Feature Resolution
+```
+
+不能简单固定为：
+
+```text
+L=2 等于 2.5 倍
+L=4 等于 5 倍
+```
+
+正式成本必须由：
+
+```text
+Parameter Count
+Activation Memory
+Forward P50/P95
+Backward Time
+```
+
+实测。
+
+---
+
+# 8. Phase 3：Steerable Kernel 与 E2Conv
+
+## 8.1 核心表达
+
+Steerable Kernel 不直接训练完整普通卷积核，而是：
+
+```text
+W(x)
+=
+Σj αj Bj(x)
+```
+
+其中：
+
+```text
+Bj
+=
+满足输入/输出 Field Type 变换约束的预计算 Basis
+
+αj
+=
+可训练系数
+```
+
+## 8.2 建议文件
+
+```text
+libtorch_module/
+├─ torch_e2_field_spec.h
+├─ torch_e2_kernel_basis.h
+├─ torch_e2_kernel_basis.cpp
+├─ torch_e2_steerable_conv.h
+├─ torch_e2_steerable_conv.cpp
+├─ torch_e2_nonlinearity.h
+├─ torch_e2_norm.h
+└─ torch_e2_operator_tests.cpp
+```
+
+## 8.3 `E2SteerableConv2d`
+
+建议接口：
+
+```cpp
+class E2SteerableConv2dImpl : public torch::nn::Module
+{
+public:
+    E2SteerableConv2dImpl(
+        E2FieldSpec input_type,
+        E2FieldSpec output_type,
+        int kernel_size,
+        int stride,
+        int padding);
+
+    torch::Tensor forward(
+        const torch::Tensor& input);
+
+private:
+    E2FieldSpec input_type_;
+    E2FieldSpec output_type_;
+
+    torch::Tensor basis_;
+    torch::Tensor coefficients_;
+};
+```
+
+执行：
+
+```text
+coefficients
+→ basis linear combination
+→ materialized kernel
+→ conv2d
+```
+
+第一阶段使用标准 ATen Tensor 操作，不立即写自定义 CUDA Kernel。
+
+## 8.4 非线性
+
+当前 `ConvModule` 使用普通：
+
+```text
+BatchNorm2d + SiLU
+```
+
+。
+
+对非平凡 E(2) Field，任意逐通道 SiLU 可能破坏变换规律。
+
+建议：
+
+```text
+frequency 0 scalar fields
+→ SiLU / ReLU
+
+frequency > 0 fields
+→ Norm Nonlinearity
+或
+Gated Nonlinearity
+```
+
+## 8.5 归一化
+
+需要 Field-aware Norm：
+
+```text
+Scalar fields
+→ standard/shared BatchNorm
+
+Vector/higher-frequency fields
+→ Norm BatchNorm
+或
+field-shared normalization
+```
+
+不得把每个 sin/cos 分量当作无关普通通道独立归一化。
+
+## 8.6 Concat / Upsample / Downsample
+
+每次操作必须检查：
+
+```text
+input field fingerprint
+output field fingerprint
+orientation convention
+frequency layout
+```
+
+Concat 只允许：
+
+```text
+相同空间群
+兼容 Field Layout
+```
+
+的 Tensor 拼接。
+
+---
+
+# 9. Phase 4：V2A 并行 Pose Tower
+
+第一版不直接替换现有 YOLO 主干。
+
+## 9.1 新模型包装
+
+建议新增：
+
+```cpp
+struct YoloV8SegE2PoseRawOutput
+{
+    YoloV8SegRawOutput segmentation;
+
+    std::vector<torch::Tensor> angle_fields;
+    std::vector<torch::Tensor> angle_quality;
+};
+```
+
+注意：
+
+> `libtorch_module` 内不得直接使用 `CxTorchDetection`、`CxTorchInstancePose` 等 `cximage` 类型。
+
+`libtorch_module` 输出必须继续保持：
+
+```text
+Tensor
+基础数值结构
+Runtime JSON
+```
+
+当前 `YoloV8SegRawOutput` 本身也是纯 Tensor 合同。
+
+## 9.2 模型结构
+
+```cpp
+class YoloV8SegE2PoseImpl : public torch::nn::Module
+{
+    YoloV8Segment base_model;
+    E2PoseTower pose_tower;
+    E2AngularHead angular_head;
+};
+```
+
+Forward：
+
+```text
+input
+├─ base_model
+│  └─ standard segmentation output
+│
+└─ pose_tower
+   ├─ e2_p3
+   ├─ e2_p4
+   └─ e2_p5
+        ↓
+   angular_head
+```
+
+## 9.3 为什么从 RGB 独立 Lift
+
+如果直接从普通 CNN 的 `x4/x6/x9` 开始：
+
+```text
+普通特征已经没有严格定义的旋转变换规律
+```
+
+后续 E2 Conv 只能提高旋转感知，不能宣称整条分支严格等变。
+
+因此 V2A 推荐：
+
+```text
+RGB
+→ E2 Lifting
+→ E2 P3/P4/P5
+```
+
+分割模型只提供：
+
+```text
+Instance Assignment
+Mask
+BBox
+```
+
+不直接提供 E2 输入 Feature。
+
+## 9.4 计算控制
+
+第一版建议：
+
+```text
+Pose Tower Channels 远小于主干
+低分辨率 P3/P4/P5
+只预测 Angle + Quality
+```
+
+中心与尺寸优先复用：
+
+```text
+现有 Box Head
+现有 Mask
+```
+
+不要在第一版重复训练：
+
+```text
+第二套 center / size 回归
+```
+
+建议分两步：
+
+```text
+H1：Angle + Confidence
+
+H2：Center Offset + Size Correction + Geometry Quality
+```
+
+---
+
+# 10. Phase 5：E2 Angular Head
+
+## 10.1 第一版采用 Anchor-Level Head
+
+由于当前已有 Task-Aligned Assignment，第一版最自然的输出是：
+
+```text
+P3 angle field
+P4 angle field
+P5 angle field
+```
+
+每个 Anchor 输出连续相位表示。
+
+这比直接在 NMS 后按实例池化更适合训练，因为：
+
+```text
+NMS 不可微
+最终实例在训练时尚未形成
+Assignment 已经能提供正样本身份
+```
+
+## 10.2 输出形式
+
+建议不直接输出：
+
+```text
+单一 angle scalar
+```
+
+而输出对称阶数对应的复数/二维向量。
+
+例如：
+
+```text
+q=1:
+cos θ, sin θ
+
+q=2:
+cos 2θ, sin 2θ
+
+q=4:
+cos 4θ, sin 4θ
+```
+
+Head 可以输出：
+
+```cpp
+struct E2AngleFieldOutput
+{
+    std::vector<torch::Tensor> q1_vectors;
+    std::vector<torch::Tensor> q2_vectors;
+    std::vector<torch::Tensor> q4_vectors;
+    std::vector<torch::Tensor> quality_logits;
+};
+```
+
+训练时按几何类型选择对应 q。
+
+## 10.3 连续角度解码
+
+```text
+vx, vy
+→ angle = atan2(vy, vx) / q
+```
+
+置信度：
+
+```text
+magnitude = sqrt(vx² + vy²)
+```
+
+可再预测：
+
+```text
+log_kappa
+```
+
+作为 Von Mises 集中度。
+
+## 10.4 Instance-Level Refinement
+
+第二阶段可增加：
+
+```text
+E2 Feature
++
+GT/Predicted Instance Mask
+→ Differentiable Masked Pooling
+→ Instance Pose Refinement
+```
+
+训练使用 GT Mask，推理使用 Predicted Mask，并分别记录：
+
+```text
+pose_pool_source
+```
+
+避免训练和推理来源不透明。
+
+---
+
+# 11. Phase 6：Loss 扩展
+
+在现有 `LossTensors` 中增加：
+
+```cpp
+torch::Tensor angle_loss;
+torch::Tensor equivariance_loss;
+torch::Tensor pose_consistency_loss;
+torch::Tensor pose_quality_loss;
+```
+
+Training Metric 同步增加对应字段。
+
+## 11.1 Circular Angle Loss
+
+对于对称阶数 `q`：
+
+```text
+L_angle =
+1 - cos(q(θpred - θgt))
+```
+
+向量形式：
+
+```text
+L_angle =
+SmoothL1(v_pred, v_gt)
++
+1 - cosine_similarity(v_pred, v_gt)
+```
+
+## 11.2 Equivariance Loss
+
+对同一图像构造：
+
+```text
+x
+Rα(x)
+```
+
+模型特征应满足：
+
+```text
+F(Rαx)
+≈
+ρ(α) RαF(x)
+```
+
+Loss：
+
+```text
+L_eq =
+‖F(Rαx) - transformed(F(x), α)‖
+```
+
+该 Loss 主要用于：
+
+```text
+验证实现正确性
+约束像素离散误差
+增强任意角度稳定性
+```
+
+但它不能替代正确的 Steerable Kernel 结构。
+
+## 11.3 Pose-Mask Consistency
+
+可以比较：
+
+```text
+Angle Head 主轴
+Mask 几何主轴
+FormFit Target 主轴
+```
+
+但 Mask 主轴只能作为弱监督，避免模型重新退化成：
+
+```text
+从 Mask 统计猜角度
+```
+
+## 11.4 Quality / Uncertainty
+
+建议预测：
+
+```text
+pose_quality
+log_kappa
+```
+
+训练目标来自：
+
+```text
+实际 angle error
+label quality
+visibility
+boundary completeness
+```
+
+## 11.5 Loss 配置
+
+Manifest Training Config 增加：
+
+```json
+{
+  "angle_loss_weight": 1.0,
+  "equivariance_loss_weight": 0.2,
+  "pose_consistency_loss_weight": 0.1,
+  "pose_quality_loss_weight": 0.1
+}
+```
+
+所有权重必须进入：
+
+```text
+training_trace.json
+loss_breakdown.json
+```
+
+---
+
+# 12. Phase 7：权重加载与模型版本
+
+当前 V1 严格加载已经是两阶段原子加载：
+
+```text
+Phase A 全量检查
+→ complete
+→ Phase B copy
+```
+
+。
+
+V2A 应使用两套加载策略。
+
+## 12.1 从 V1 初始化 V2A
+
+```text
+base_model
+→ 调用现有 load_state_dict_strict()
+
+pose_tower
+→ 新初始化
+
+angular_head
+→ 新初始化
+```
+
+不要把整个 Wrapper 的 Key 与 V1 State Dict 直接比较，因为注册 `base_model` 后，Key 前缀会变化。
+
+## 12.2 V2 完整 Checkpoint
+
+V2 Checkpoint 必须保存：
+
+```text
+base_model.*
+pose_tower.*
+angular_head.*
+field_spec
+equivariance_config
+symmetry_schema_hash
+```
+
+## 12.3 Transfer Report
+
+```json
+{
+  "schema": "cxvision.yolov8seg.e2_transfer.v1",
+  "parent_architecture": "yolov8_seg",
+  "target_architecture": "yolov8_seg_e2_pose",
+  "base_mapping_complete": true,
+  "new_pose_keys": [],
+  "new_angular_keys": [],
+  "unexpected_missing_keys": [],
+  "shape_mismatches": []
+}
+```
+
+---
+
+# 13. Phase 8：Manifest 与 Task 路由
+
+## 13.1 当前 Manifest 限制
+
+当前 `TorchModelManifest` 没有：
+
+```text
+equivariance
+field type
+maximum frequency
+angular head
+symmetry schema
+```
+
+字段。
+
+当前实例分割 Validator 又强制：
+
+```text
+schema_version = 2
+architecture = yolov8_seg
+variant = nano
+```
+
+。
+
+因此必须新增独立版本。
+
+## 13.2 建议 Manifest v3
+
+```json
+{
+  "schema": "cxvision.torch.model_manifest",
+  "schema_version": 3,
+
+  "task": "instance_segmentation_pose",
+  "architecture": "yolov8_seg_e2_pose",
+  "variant": "nano_pose_v2",
+
+  "equivariance": {
+    "group": "SO2",
+    "implementation": "steerable",
+    "max_frequency": 2,
+    "field_schema": "e2_pose_field_v1",
+    "lift_source": "rgb"
+  },
+
+  "angular_head": {
+    "outputs": ["q1", "q2", "q4"],
+    "quality": "magnitude_log_kappa"
+  },
+
+  "symmetry_schema_ref": "orientation_symmetry.json"
+}
+```
+
+新增：
+
+```cpp
+ValidateEquivariantInstanceSegmentationManifest()
+```
+
+不得放宽现有 V1 Validator。
+
+## 13.3 新 Task ID
+
+建议：
+
+```text
+torch.infer.instance_segmentation.yolov8_e2_pose.v1
+
+torch.train.instance_segmentation.yolov8_e2_pose.backward_smoke.v1
+
+torch.contract.instance_segmentation_pose.v1
+```
+
+当前 Task ID 列表尚未包含这些任务。
+
+## 13.4 Dispatcher
+
+新增精确路由：
+
+```text
+E2 Pose Contract
+→ Validate Manifest / Field Schema
+
+E2 Pose Inference
+→ ExecuteTorchYoloV8SegE2PoseTask
+
+E2 Pose Training
+→ ExecuteTorchYoloV8SegE2PoseBackwardTask
+```
+
+不增加新的 DLL。
+
+当前 Runtime DLL 已经统一编译 Dispatcher、Manifest、YOLOv8-Seg Executor 等生产源文件，因此新增 E2 文件应继续进入现有 `LIBTORCH_MODULE_CORE_SOURCES`。
+
+---
+
+# 14. Phase 9：推理与 Postprocess
+
+## 14.1 Anchor 到 Instance
+
+当前 `SegCandidate` 应增加：
+
+```text
+level_index
+anchor_index
+row
+column
+```
+
+NMS 后利用最终 Candidate 的 Anchor 来源，从：
+
+```text
+E2AngleFieldOutput
+```
+
+Gather：
+
+```text
+angle vector
+quality
+uncertainty
+```
+
+## 14.2 每实例 Runtime 结果
+
+`instances.json` 中新增：
+
+```json
+{
+  "stable_id": "instance_0001",
+
+  "class_id": 0,
+  "class_confidence": 0.94,
+
+  "bbox": {},
+
+  "coarse_pose": {
+    "source": "yolov8seg_e2_pose",
+    "angle_deg": 31.4,
+    "symmetry_order": 2,
+    "confidence": 0.91,
+    "circular_std_deg": 2.1,
+    "predictive_only": true
+  },
+
+  "mask_ref": "...",
+  "contour_ref": "..."
+}
+```
+
+## 14.3 新 Artifact
+
+```text
+e2_field_schema.json
+equivariance_trace.json
+angle_distribution.json
+coarse_pose.json
+pose_calibration.json
+pose_fastmatch_handoff.json
+```
+
+## 14.4 Evidence 约束
+
+必须记录：
+
+```text
+architecture
+field schema
+max frequency
+model hash
+instance stable ID
+angle source
+symmetry order
+angle vector
+confidence
+uncertainty
+predictive_only
+```
+
+---
+
+# 15. Phase 10：Canonical Result 与 FindSegmentation
+
+## 15.1 当前外层缺口
+
+当前 `CxInferenceResult` 只有：
+
+```text
+detections[]
+optional mask
+metrics
+artifact refs
+```
+
+。
+
+当前 Adapter 虽然扫描 `stable_id`，最终仍将实例压缩为普通 `CxTorchDetection`，没有保留实例身份和姿态。
+
+所以“FindSegmentation 无需修改即可读取粗姿态”并不完全成立。
+
+不需要重构算法，但需要最小合同扩展。
+
+## 15.2 新增粗姿态结构
+
+```cpp
+struct CxCoarsePose
+{
+    bool available = false;
+
+    double center_x = 0.0;
+    double center_y = 0.0;
+
+    double size_a = 0.0;
+    double size_b = 0.0;
+
+    double angle_deg = 0.0;
+    int symmetry_order = 1;
+
+    double confidence = 0.0;
+    double circular_std_deg = 180.0;
+
+    std::string source;
+    std::string distribution_ref;
+
+    bool predictive_only = true;
+};
+```
+
+实例结果：
+
+```cpp
+struct CxTorchInstance
+{
+    std::string stable_id;
+
+    CxTorchDetection detection;
+    CxCoarsePose coarse_pose;
+
+    std::string mask_ref;
+    std::string contour_ref;
+};
+```
+
+在：
+
+```cpp
+CxInferenceResult
+```
+
+增加：
+
+```cpp
+std::vector<CxTorchInstance> instances;
+```
+
+## 15.3 FindSegmentationRegion
+
+当前 `FindSegmentationRegion` 已具有：
+
+```text
+stable_id
+class
+confidence
+bbox
+mask
+contour
+```
+
+但没有粗姿态。
+
+增加：
+
+```cpp
+std::optional<CxCoarsePose> coarse_pose;
+```
+
+## 15.4 Backend
+
+当前 Backend 已经使用：
+
+```cpp
+request.task = input.task_id;
+```
+
+不再硬编码 DeepLab Task。
+
+但它当前只解析 Contour，没有实际填充：
+
+```text
+output.regions
+output.primitive_hypotheses
+```
+
+。
+
+本阶段需要：
+
+```text
+Runtime Instance
+→ FindSegmentationRegion
+→ coarse_pose
+→ primitive_hypothesis seed
+```
+
+这属于数据适配，不修改分割算法核心。
+
+---
+
+# 16. Phase 11：FastMatch Handoff
+
+建议新增：
+
+```cpp
+struct FastMatchPoseSeed
+{
+    std::string instance_id;
+    std::string source;
+
+    cv::Point2d center;
+
+    double angle_deg = 0.0;
+    int symmetry_order = 1;
+
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+
+    double confidence = 0.0;
+    double circular_std_deg = 180.0;
+
+    bool predictive_only = true;
+};
+```
+
+## 16.1 高置信度
+
+```text
+E2 Pose
+→ transformmatch Seed
+→ 小角度搜索范围
+→ Shape Model FormFit
+```
+
+## 16.2 中等置信度
+
+```text
+E2 Pose 多假设
+→ 小范围 RotateMatchAB
+→ TransformMatch
+→ FormFit
+```
+
+## 16.3 低置信度
+
+```text
+Mask OBB
+或
+Legacy RotateMatchAB
+```
+
+## 16.4 搜索范围
+
+搜索窗口不应简单写死：
+
+```text
+confidence > 0.8
+→ ±5°
+```
+
+应通过验证集建立：
+
+```text
+confidence / circular_std
+→ 实际 angle error distribution
+```
+
+再映射：
+
+```text
+search_range =
+clamp(k × calibrated_std, min, max)
+```
+
+## 16.5 最终状态
+
+E2 Pose 不得直接写入正式量测结果。
+
+它只能写入：
+
+```text
+FastMatch Initial Transform
+Predictive Geometry Hypothesis
+Evidence
+```
+
+---
+
+# 17. Phase 12：训练流程
+
+## 17.1 T0：冻结 V1
+
+固定：
+
+```text
+V1 Weight Hash
+Dataset Hash
+Mask mIoU
+Instance Recall
+Mask OBB Angle
+FastMatch Baseline
+Final Measurement Baseline
+```
+
+## 17.2 T1：Pose Tower 单独训练
+
+冻结：
+
+```text
+base_model
+```
+
+训练：
+
+```text
+pose_tower
+angular_head
+```
+
+数据主要使用：
+
+```text
+Controlled Geometry
+FormFit Reviewed Pose
+```
+
+## 17.3 T2：Synthetic Overfit
+
+使用少量：
+
+```text
+Rectangle
+Ellipse
+Line
+Asymmetric Part
+```
+
+目标：
+
+```text
+Angle Loss 接近零
+对称周期正确
+Circle 不产生 Angle 梯度
+```
+
+## 17.4 T3：全角度受控训练
+
+覆盖：
+
+```text
+0°~360°
+Scale
+Translation
+Blur
+Noise
+Brightness
+Gap
+Partial Visibility
+```
+
+## 17.5 T4：联合训练
+
+解冻：
+
+```text
+V1 部分层
++
+Pose Tower
+```
+
+前提：
+
+```text
+Mask mIoU 下降在允许范围内
+```
+
+## 17.6 T5：Normal Trace 校准
+
+Normal Trace 主要用于：
+
+```text
+Angle Bias Calibration
+Confidence Calibration
+FastMatch Search Window Calibration
+```
+
+避免直接把同一 FastMatch 算法同时作为：
+
+```text
+全部训练真值
++
+唯一验收真值
+```
+
+---
+
+# 18. 验证 Gate
+
+## G0：Operator Gate
+
+```text
+Field Type 检查
+Steerable Basis 检查
+Forward Equivariance Error
+Backward Gradient
+Save / Reload
+CPU / CUDA Parity
+```
+
+## G1：Synthetic Pose Gate
+
+指标：
+
+```text
+symmetry-aware Angle MAE
+Median
+P95
+Maximum Error
+Confidence Calibration
+```
+
+## G2：Segmentation Non-regression Gate
+
+```text
+mIoU
+Dice
+Instance Recall
+False Positive
+Mask Boundary Error
+```
+
+## G3：真实样本 Gate
+
+对比：
+
+```text
+Mask minAreaRect
+普通 CNN sin/cos Head
+普通 CNN Circular Head
+E2 Pose Head
+```
+
+这样才能证明收益来自：
+
+```text
+等变 Feature
+```
+
+而不只是：
+
+```text
+换了 Angle Loss
+```
+
+## G4：FastMatch 应用 Gate
+
+记录：
+
+```text
+初始角度误差
+搜索角度范围
+候选数量
+TransformMatch 迭代
+FormFit 迭代
+失败率
+Wrong-edge Rate
+P50/P95 时间
+```
+
+## G5：最终量测 Gate
+
+完整链：
+
+```text
+E2 Pose
+→ FastMatch
+→ Normal Trace
+→ FormFit
+→ Calibration
+→ Predictive Gate
+```
+
+验证：
+
+```text
+中心误差
+角度误差
+尺寸误差
+重复性
+最大误差
+量测通过率
+人工审核率
+```
+
+用户提出的：
+
+```text
+角度 MAE < 0.5°
+或 < 1°
+```
+
+可以作为研发目标，但正式阈值必须先考虑：
+
+```text
+FormFit 标签重复性
+Normal Trace 重复性
+图像分辨率
+标定不确定度
+```
+
+不能将低于真值噪声的指标直接设成硬 Gate。
+
+---
+
+# 19. 消融实验
+
+| 版本 | 特征结构                    | Angle 表达         | FastMatch |
+| -- | ----------------------- | ---------------- | --------- |
+| A0 | 无角度头                    | Mask minAreaRect | 否         |
+| A1 | 普通 CNN                  | sin/cos          | 否         |
+| A2 | 普通 CNN                  | Circular vector  | 否         |
+| A3 | E2 Pose max-frequency 1 | Circular vector  | 否         |
+| A4 | E2 Pose max-frequency 2 | Circular vector  | 否         |
+| A5 | E2 Pose + consistency   | Circular vector  | 否         |
+| A6 | A4/A5                   | Circular vector  | 是         |
+| A7 | 无模型姿态                   | Legacy Search    | 是         |
+| A8 | 集成式 V2B                 | Circular vector  | 是         |
+
+每一项必须同时记录：
+
+```text
+模型姿态精度
+分割质量
+FastMatch 收敛
+最终量测精度
+推理时间
+显存
+```
+
+---
+
+# 20. V2B：中高层正式等变化
+
+只有 V2A 通过全部应用 Gate 后才开启。
+
+## 20.1 替换边界
+
+建议从一个明确 Lifting Point 开始：
+
+```text
+P2 Feature
+→ Trivial-to-E2 Lift
+→ E2 P3/P4/P5
+→ E2 Neck
+```
+
+而不是任意在 P3 中间插入一个 E2 Conv。
+
+## 20.2 等变链完整性
+
+从 Lift 到 Angular Head 之间必须全部使用：
+
+```text
+E2 Conv
+Field-aware Norm
+Field-compatible Nonlinearity
+E2 Upsample/Downsample
+Field-safe Concat
+```
+
+只要中间插入一个任意普通通道混合 Conv，就不能继续宣称这段链严格等变。
+
+## 20.3 分割 Head
+
+E2 Feature 可以分两路：
+
+```text
+Orientation Invariant Pooling
+→ 原有 Box / Class / Mask Head
+
+Orientation-carrying Fields
+→ Angular Head
+```
+
+---
+
+# 21. CxGeoMetry 后续衔接
+
+CxGeoMetry 的既定方向是将 FastMatch/CxTextInspect 的显式多尺度容器、Route 和候选节点转化为统一模型图，并在该显式网络内部学习评分、Route、原型和描述子，而不是依赖外部 YOLO 几何头替代自身结构。
+
+其 LibTorch 化目标是：
+
+```text
+C++ 对象网络
+→ 设备无关 Tensor 图
+→ Functional Operators
+→ CPU / CUDA / XPU 分发
+```
+
+。
+
+所以 YOLO E2 模型验证后，只迁移以下通用能力：
+
+```text
+E2 Field Schema
+Steerable Basis
+Circular Angle Decode
+Pose Confidence
+Equivariance Test
+CPU/CUDA E2 Ops
+```
+
+不迁移：
+
+```text
+YOLO Backbone
+YOLO Neck
+Detection Head
+Mask Proto
+```
+
+## 21.1 CxGeoMetry 接入条件
+
+必须满足：
+
+```text
+E2 Pose 明显改善 FastMatch 初值
+最终量测精度不退化
+置信度能可靠控制回退
+CPU/CUDA 一致
+Artifact 可追溯
+```
+
+未通过时，E2 保持为 YOLO 实验分支，不进入 CxGeoMetry。
+
+---
+
+# 22. 线程拆分与提交顺序
+
+## Thread A：实例级 Target
+
+```text
+feat(yolov8seg-target):
+per-instance geometry and symmetry targets
+```
+
+## Thread B：Python Reference
+
+```text
+research(e2-reference):
+escnn reference operators and golden tensors
+```
+
+## Thread C：C++ E2 Operators
+
+```text
+feat(torch-e2-ops):
+field spec, steerable basis, e2 conv, norm, nonlinearity
+```
+
+## Thread D：Pose Tower
+
+```text
+feat(yolov8seg-e2-pose):
+parallel pose tower and angular head
+```
+
+## Thread E：Loss
+
+```text
+feat(yolov8seg-pose-loss):
+circular, equivariance, consistency and quality losses
+```
+
+## Thread F：Manifest / Runtime
+
+```text
+feat(torch-e2-runtime):
+manifest v3, task ids, dispatcher and checkpoint
+```
+
+## Thread G：Canonical Result
+
+```text
+feat(torch-instance-pose-result):
+stable instance and coarse pose result
+```
+
+## Thread H：FindSegmentation / FastMatch
+
+```text
+feat(fastmatch-pose-seed):
+coarse pose handoff and calibrated search window
+```
+
+## Thread I：Regression / Ablation
+
+```text
+test(yolov8seg-e2-pose):
+operator, synthetic, real and end-to-end gates
+```
+
+## Thread J：V2B
+
+仅在前九个线程通过后开启。
+
+---
+
+# 23. 开发约束
+
+1. **二维项目统一使用 E(2)/SO(2) 命名，不使用模糊的 e3cnn 命名。**
+
+2. **Python `escnn` 只作为研究参考，不直接成为生产 C++ Runtime 依赖。**
+
+3. **V1 必须冻结，V2 使用独立 Architecture 和 Manifest。**
+
+4. **第一阶段只增加并行 Pose Tower，不直接重构整个 YOLO 主干。**
+
+5. **实例级 Geometry Target 是 Angular Head 的前置条件。**
+
+6. **不得重复实现已有 Task-Aligned Assignment 和 Dice Loss。**
+
+7. **E2 模块必须携带 Field Type，不能只靠普通 Tensor Shape 猜测语义。**
+
+8. **非平凡 Field 不得直接使用任意逐通道 BN/SiLU。**
+
+9. **第一版优先只预测 Angle 和 Confidence，Center/Size 复用现有 Box/Mask。**
+
+10. **所有 Angle Loss 必须考虑对象旋转对称性。**
+
+11. **Circle 等无唯一方向对象不得计算 Angle Loss。**
+
+12. **Raw Pose 必须保留完整分布、置信度和不确定度。**
+
+13. **libtorch_module 不得依赖 cximage 类型。**
+
+14. **FindSegmentation 需要最小结果合同扩展，但不修改分割算法主线。**
+
+15. **模型粗姿态只能作为 FastMatch Seed 和 PredictiveHypothesis。**
+
+16. **最终角度和尺寸仍由 Normal Trace、FormFit、Calibration 与 Gate 决定。**
+
+17. **不得将连续等变描述为完全无离散误差。**
+
+18. **不得在未经实测时承诺固定计算倍率和角度精度。**
+
+19. **V2A 未证明 FastMatch 应用收益，不进入 V2B。**
+
+20. **YOLO E2 未通过最终量测 Gate，不迁移到 CxGeoMetry。**
+
+---
+
+# 24. 最终推进主线
+
+```text
+冻结 YOLOv8-Seg V1
+        ↓
+实例级 Geometry / Symmetry Target
+        ↓
+Python escnn 数值参考
+        ↓
+C++ E2 Field / Kernel / Operator
+        ↓
+Operator Equivariance Tests
+        ↓
+V2A Parallel E2 Pose Tower
+        ↓
+Anchor-Level Angular Head
+        ↓
+Circular / Equivariance / Quality Loss
+        ↓
+Synthetic Overfit
+        ↓
+受控全角度训练
+        ↓
+真实样本验证
+        ↓
+Runtime Instance Pose Artifact
+        ↓
+CxInferenceResult / FindSegmentationRegion
+        ↓
+FastMatch Pose Seed
+        ↓
+Normal Trace / FormFit
+        ↓
+最终量测 Gate
+        ↓
+V2A 消融与性能评估
+        ↓
+决定是否推进 V2B
+        ↓
+提取通用 E2 Ops
+        ↓
+CxGeoMetry Tensor / CUDA 演化
+```
+
+# 25. 最终定义
+
+E(2) 等变 YOLOv8-Seg 的职责是：
+
+```text
+在复杂背景和任意平面旋转下
+稳定输出：
+实例
+Mask
+粗中心
+粗尺度
+连续粗角度
+姿态置信度
+姿态不确定度
+```
+
+FastMatch 的职责是：
+
+```text
+利用粗姿态缩小搜索范围
+进行候选验证
+建立局部对应
+完成连续配准
+```
+
+Normal Trace 与 FormFit 的职责是：
+
+```text
+提取真实图像边缘
+输出可审计边缘证据
+完成几何闭合
+```
+
+Predictive Geometry Gate 的职责是：
+
+```text
+决定该结果属于：
+DirectMeasurement
+ClampedMeasurement
+PredictiveHypothesis
+Undeterminable
+```
+
+因此这次 Torch 侧改造的最终目标不是让模型接管量测，而是：
+
+> **让模型提供更可靠、更连续、更可校准的姿态初值，从而减少 FastMatch 的搜索空间和失败概率，同时保持最终计量结果仍由显式边缘证据与确定性几何链产生。**
+
+
+
+
+ 
