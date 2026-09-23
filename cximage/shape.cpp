@@ -1,10 +1,7 @@
-﻿#include "pch.h"
-
+﻿
 #include "Shape.h"
-
 static const int resizeHandleWidth = 10;
  
-
 const gp_Pnt Shape::minSize(30, 20, 0);
 
 Shape::Shape(Type type, const Quantity_Color& color, const gp_Rectangle& rect)
